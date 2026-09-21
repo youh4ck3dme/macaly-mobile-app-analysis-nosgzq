@@ -8,6 +8,7 @@ import {
   ChevronDown,
   MapPin,
   AlertTriangle,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -54,6 +55,92 @@ export type SherlockAnalysis = {
   }>;
 };
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function objectArray(value: unknown): any[] {
+  return Array.isArray(value) ? value.filter(isPlainObject) : [];
+}
+
+// Stabilné ID (P001/E001/T001) generuje map až pri čistení analýzy.
+
+// Čistí nesprávne tvarovanú analýzu (stray prvky, chýbajúce ID) pred renderingom a exportom.
+export function sanitizeAnalysis(analysis: SherlockAnalysis) {
+  const metadata: NonNullable<SherlockAnalysis["metadata"]> = isPlainObject(analysis.metadata)
+    ? (analysis.metadata as NonNullable<SherlockAnalysis["metadata"]>)
+    : {};
+
+  const persons: NonNullable<SherlockAnalysis["persons"]> = objectArray(analysis.persons)
+    .filter((p) => nonEmptyString(p.name))
+    .map((p, index) => {
+      const entry: NonNullable<SherlockAnalysis["persons"]>[number] = {
+        id: nonEmptyString(p.id) ? p.id.trim() : `P${String(index + 1).padStart(3, "0")}`,
+        name: String(p.name).trim(),
+      };
+      if (nonEmptyString(p.role)) entry.role = p.role.trim();
+      if (nonEmptyString(p.description)) entry.description = p.description.trim();
+      return entry;
+    });
+
+  type EvidenceEntry = NonNullable<SherlockAnalysis["evidence"]>[number];
+  const evidence: NonNullable<SherlockAnalysis["evidence"]> = objectArray(analysis.evidence).map(
+    (e, index): EvidenceEntry => ({
+      ...e,
+      id: nonEmptyString(e.id) ? e.id.trim() : `E${String(index + 1).padStart(3, "0")}`,
+    }),
+  );
+
+  type RelationshipEntry = NonNullable<SherlockAnalysis["relationships"]>[number];
+  const relationships: NonNullable<SherlockAnalysis["relationships"]> = objectArray(
+    analysis.relationships,
+  ).map((r): RelationshipEntry => ({ ...r }));
+
+  type TimelineEntry = NonNullable<SherlockAnalysis["timeline"]>[number];
+  const timeline: NonNullable<SherlockAnalysis["timeline"]> = objectArray(analysis.timeline).map(
+    (t, index): TimelineEntry => ({
+      ...t,
+      id: nonEmptyString(t.id) ? t.id.trim() : `T${String(index + 1).padStart(3, "0")}`,
+    }),
+  );
+
+  return { metadata, persons, evidence, relationships, timeline };
+}
+
+export function buildAnalysisExport(
+  analysis: SherlockAnalysis,
+  name?: string,
+): { filename: string; json: string } {
+  const exportDate = new Date();
+  const date = exportDate.toISOString().slice(0, 10);
+  const normalizedName = (name ?? "analyza")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "analyza";
+  // Export obsahuje len vyčistené a validné záznamy.
+  const safe = sanitizeAnalysis(analysis);
+  const payload = {
+    exportedAt: exportDate.toISOString(),
+    ...(name ? { name } : {}),
+    metadata: safe.metadata,
+    persons: safe.persons,
+    evidence: safe.evidence,
+    relationships: safe.relationships,
+    timeline: safe.timeline,
+  };
+
+  return {
+    filename: `${normalizedName}-${date}.json`,
+    json: JSON.stringify(payload, null, 2),
+  };
+}
+
 function formatTimestamp(ts?: string | null): string {
   if (!ts) return "Neznámy čas";
   const date = new Date(ts);
@@ -75,10 +162,10 @@ export function SherlockResults({
   const [searchTerm, setSearchTerm] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const persons = analysis.persons ?? [];
-  const evidence = analysis.evidence ?? [];
-  const relationships = analysis.relationships ?? [];
-  const timeline = analysis.timeline ?? [];
+  const { metadata, persons, evidence, relationships, timeline } = useMemo(
+    () => sanitizeAnalysis(analysis),
+    [analysis],
+  );
 
   const personById = useMemo(() => {
     const map = new Map<string, { name: string; role?: string }>();
@@ -122,50 +209,90 @@ export function SherlockResults({
     () => [...evidence].sort((a, b) => (b.relevance_score ?? 0) - (a.relevance_score ?? 0)),
     [evidence],
   );
+  const canExport = timeline.length > 0 || persons.length > 0 || evidence.length > 0 || relationships.length > 0;
+  const handleExport = () => {
+    if (!canExport) return;
+    const { filename, json } = buildAnalysisExport(analysis, metadata?.document_name);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
 
-  if (timeline.length === 0 && persons.length === 0 && evidence.length === 0) {
+  if (!canExport) {
     return (
-      <div
-        className="flex items-center gap-3 rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground"
-        data-testid="sherlock-no-results"
-      >
-        <AlertTriangle className="size-5 shrink-0" />
-        <span>Analýza neobsahuje žiadne zistené udalosti, osoby ani dôkazy.</span>
+      <div className="space-y-3">
+        <div className="flex justify-end">
+          <button
+            type="button"
+            data-testid="export-json"
+            disabled
+            title="Export nie je dostupný, pretože analýza neobsahuje žiadne údaje."
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Download className="size-4" />
+            Exportovať JSON
+          </button>
+        </div>
+        <div
+          className="flex items-center gap-3 rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground"
+          data-testid="sherlock-no-results"
+        >
+          <AlertTriangle className="size-5 shrink-0" />
+          <span>Analýza neobsahuje žiadne zistené udalosti, osoby ani dôkazy.</span>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-8" data-testid="sherlock-results">
+      <div className="flex justify-end">
+        <button
+          type="button"
+          data-testid="export-json"
+          onClick={handleExport}
+          title="Exportovať výsledok analýzy ako JSON"
+          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary hover:text-primary"
+        >
+          <Download className="size-4" />
+          Exportovať JSON
+        </button>
+      </div>
       {/* Metadata */}
-      {analysis.metadata && (
+      {isPlainObject(analysis.metadata) && (
         <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-2">
             <FileText className="size-5 text-primary" />
             <h2 className="text-base font-bold">
-              {analysis.metadata.document_name ?? "Analýza dokumentu"}
+              {metadata?.document_name ?? "Analýza dokumentu"}
             </h2>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-3 text-sm md:grid-cols-3">
-            {analysis.metadata.page_count != null && (
+            {metadata?.page_count != null && (
               <div>
                 <span className="block text-xs text-muted-foreground">Počet strán</span>
-                <span className="font-medium">{analysis.metadata.page_count}</span>
+                <span className="font-medium">{metadata.page_count}</span>
               </div>
             )}
-            {analysis.metadata.language && (
+            {metadata?.language && (
               <div>
                 <span className="block text-xs text-muted-foreground">Jazyk</span>
                 <span className="font-medium uppercase">
-                  {analysis.metadata.language}
+                  {metadata.language}
                 </span>
               </div>
             )}
-            {analysis.metadata.upload_date && (
+            {metadata?.upload_date && (
               <div>
                 <span className="block text-xs text-muted-foreground">Dátum</span>
                 <span className="font-medium">
-                  {new Date(analysis.metadata.upload_date).toLocaleDateString("sk-SK")}
+                  {new Date(metadata.upload_date).toLocaleDateString("sk-SK")}
                 </span>
               </div>
             )}
@@ -334,7 +461,7 @@ export function SherlockResults({
               >
                 <div className="flex items-center gap-3">
                   <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
-                    {person.name.slice(0, 1).toUpperCase()}
+                    {(person.name.slice(0, 1) || "?").toUpperCase()}
                   </div>
                   <div className="min-w-0">
                     <p className="truncate font-bold">{person.name}</p>

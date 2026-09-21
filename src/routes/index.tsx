@@ -8,7 +8,7 @@ import { api } from "../../convex/_generated/api";
 import type { Doc } from "../../convex/_generated/dataModel";
 import siteMetadata from "../metadata.json";
 
-const SITE_ORIGIN = "https://nosgzqflza19pn0bs55f4iba.macaly.app";
+const SITE_ORIGIN = "https://forenx.bizagent.sk";
 
 export const Route = createFileRoute("/")({
   head: () => {

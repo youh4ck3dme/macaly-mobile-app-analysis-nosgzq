@@ -8,12 +8,16 @@ export type MistralMessage = {
   content: string;
 };
 
-function requiredEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required Convex environment variable: ${name}`);
+/** Reads the Mistral key, accepting either supported secret name. */
+function mistralApiKey(): string {
+  const value = process.env.MISTRAL_API_KEY || process.env.MISTRAL_KEY;
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    throw new Error(
+      "Chýba Mistral API kľúč. Uložte MISTRAL_API_KEY alebo MISTRAL_KEY v Settings → Secrets.",
+    );
   }
-  return value;
+  return trimmed;
 }
 
 /** Calls Mistral from a Convex Node action and returns JSON-mode output only. */
@@ -23,7 +27,7 @@ export async function analyzeWithMistral(
   const response = await fetch(MISTRAL_API_URL, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${requiredEnv("MISTRAL_API_KEY")}`,
+      Authorization: `Bearer ${mistralApiKey()}`,
       "Content-Type": "application/json",
       Accept: "application/json",
     },

@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from "react";
 import type { ChangeEvent, DragEvent } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import {
@@ -72,7 +72,7 @@ function formatDate(ts: number): string {
 
 export function PdfSandboxUpload() {
   const generateUploadUrl = useMutation(api.files.generateUploadUrl);
-  const saveFileMetadata = useMutation(api.files.saveFileMetadata);
+  const finalizeUpload = useAction(api.files.finalizeUpload);
   const removeFile = useMutation(api.files.remove);
   const filesResult = useQuery(api.files.listMyFiles, {});
 
@@ -187,7 +187,7 @@ export function PdfSandboxUpload() {
         throw new Error("Server nevrátil ID uloženého súboru.");
       }
 
-      const saveResult = await saveFileMetadata({
+      const saveResult = await finalizeUpload({
         storageId: storageId as Id<"_storage">,
         filename: selectedFile.name,
         contentType,

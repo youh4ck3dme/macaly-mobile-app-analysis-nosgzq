@@ -19,8 +19,8 @@ export default defineConfig({
         extends: true,
         test: {
           name: "frontend",
-          include: ["**/*.test.{ts,tsx}"],
-          exclude: ["__tests__/convex/**", "node_modules", ".tanstack"],
+          include: ["__tests__/**/*.test.{ts,tsx}"],
+          exclude: ["__tests__/convex/**", "node_modules", ".tanstack", ".sandbox"],
           environment: "jsdom",
           setupFiles: ["./vitest.setup.ts"],
         },
