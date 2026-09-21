@@ -1,0 +1,58 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+.output
+
+# misc
+.DS_Store
+*.pem
+.cache
+.local
+.lesshst
+
+# archives
+*.zip
+*.tar.gz
+*.tar.xz
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# macaly internal files
+.macaly/skills
+.sandbox
+.profile
+.bashrc
+.bash_logout
+.bash_profile
+.bash_history
+.npm
+.npmrc
+.config
+.sudo_as_admin_successful
+.tanstack
+.gitconfig
+.macaly-git-wrapper.sh

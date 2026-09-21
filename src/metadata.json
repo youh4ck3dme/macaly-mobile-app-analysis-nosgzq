@@ -1,0 +1,37 @@
+{
+  "default": {
+    "openGraph": {
+      "images": "https://assets.macaly-user-data.dev/x5lw0ag09y9uqxin7k1c87ll/nosgzqflza19pn0bs55f4iba/_z8QMe366ECgxCaRnaJ8b/generated-7e976reI.png"
+    }
+  },
+  "/": {
+    "title": "ForenzDetectiv: správa forenzných prípadov",
+    "description": "Prehľadná dashboardová správa prípadov so stavmi, prioritami a možnosťou vytvárať a upravovať vlastné prípady.",
+    "openGraph": {}
+  },
+  "/archive": {
+    "title": "Archív dôkazov a dokumentov",
+    "description": "Všetky nahrané dokumenty, fotografie a dôkazy k jednotlivým prípadom na jednom bezpečnom mieste.",
+    "openGraph": {}
+  },
+  "/graph": {
+    "title": "Graf vzťahov a prepojení",
+    "description": "Vizualizácia osôb, spojení a prepojení medzi výpoveďami, ktorá odhaľuje vzťahy v prípade.",
+    "openGraph": {}
+  },
+  "/sherlock": {
+    "title": "Sherlock AI: forenzná analýza dokumentov",
+    "description": "AI analýza PDF dokumentov extrahuje časovú os, osoby, dôkazy a vzťahy priamo z vášho sandboxu.",
+    "openGraph": {}
+  },
+  "/sandbox": {
+    "title": "Súkromný dokumentový sandbox",
+    "description": "Nahrávajte PDF, DOCX alebo textové dokumenty do bezpečného úložiska, ktoré je viditeľné iba pre vás.",
+    "openGraph": {}
+  },
+  "/settings": {
+    "title": "Nastavenia účtu a bezpečnosti",
+    "description": "Správa zobrazovaného mena, e-mailových upozornení, vzhľadu aplikácie a prístupu k vášmu účtu.",
+    "openGraph": {}
+  }
+}
