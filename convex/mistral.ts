@@ -11,12 +11,13 @@ export type MistralMessage = {
 /** Reads the Mistral key, accepting either supported secret name. */
 function mistralApiKey(): string {
   const value = process.env.MISTRAL_API_KEY || process.env.MISTRAL_KEY;
-  if (!value) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
     throw new Error(
-      "Chýba Mistral API kľúč. Uložte MISTRAL_API_KEY v Settings → Secrets.",
+      "Chýba Mistral API kľúč. Uložte MISTRAL_API_KEY alebo MISTRAL_KEY v Settings → Secrets.",
     );
   }
-  return value.trim();
+  return trimmed;
 }
 
 /** Calls Mistral from a Convex Node action and returns JSON-mode output only. */

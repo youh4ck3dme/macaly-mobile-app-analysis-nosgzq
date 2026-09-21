@@ -55,7 +55,8 @@ describe("SherlockResults export", () => {
     expect(screen.getByTestId("export-json")).toBeDisabled();
   });
 
-  it("downloads the exported JSON and revokes its object URL", () => {
+  it("downloads the exported JSON and revokes its object URL", async () => {
+    vi.useFakeTimers();
     const createObjectURL = vi.fn(() => "blob:test");
     const revokeObjectURL = vi.fn();
     vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
@@ -64,7 +65,9 @@ describe("SherlockResults export", () => {
     fireEvent.click(screen.getByTestId("export-json"));
 
     expect(createObjectURL).toHaveBeenCalledOnce();
+    await vi.runAllTimersAsync();
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:test");
+    vi.useRealTimers();
   });
 });
 

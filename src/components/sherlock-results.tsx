@@ -63,7 +63,7 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function objectArray(value: unknown): Record<string, unknown>[] {
+function objectArray(value: unknown): any[] {
   return Array.isArray(value) ? value.filter(isPlainObject) : [];
 }
 
@@ -119,7 +119,7 @@ export function buildAnalysisExport(
   const date = exportDate.toISOString().slice(0, 10);
   const normalizedName = (name ?? "analyza")
     .normalize("NFD")
-    .replace(/[\\u0300-\\u036f]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "analyza";
@@ -221,7 +221,7 @@ export function SherlockResults({
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
   if (!canExport) {
