@@ -67,12 +67,23 @@ async function seedUser(t: ReturnType<typeof makeT>) {
 
 // Seed a valid storage record so storageId references resolve in the test DB.
 // The stored blob's real size is what the server must trust.
+async function seedStorageBlob(
+  t: ReturnType<typeof makeT>,
+  content: string,
+  type = "application/octet-stream",
+): Promise<Id<"_storage">> {
+  return await t.run(async (ctx) => {
+    const storageId = await (ctx as any).storage.store(new Blob([content], { type }))
+    return storageId as Id<"_storage">
+  })
+}
+
 async function seedStorageId(
   t: ReturnType<typeof makeT>,
   contentSizeBytes = 1024,
 ): Promise<Id<"_storage">> {
   return await t.run(async (ctx) => {
-    const content = "a".repeat(contentSizeBytes)
+    const content = `%PDF-${"a".repeat(Math.max(0, contentSizeBytes - 5))}`
     const blob = new Blob([content], { type: "application/pdf" })
     const storageId = await (ctx as any).storage.store(blob)
     return storageId as Id<"_storage">
@@ -279,6 +290,76 @@ describe("files.saveFileMetadata - server-side validation", () => {
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.code).toBe("INVALID")
+    }
+  })
+
+  it("rejects PDF extension mismatch and deletes the blob", async () => {
+    const t = makeT()
+    const userId = await seedUser(t)
+    const storageId = await seedStorageBlob(t, "not a pdf")
+    const result = await t.withIdentity({ subject: userId }).action(api.files.finalizeUpload, {
+      storageId, filename: "evidence.pdf", contentType: "application/pdf", size: 10,
+    })
+    expect(result).toMatchObject({ ok: false, code: "INVALID" })
+    expect(await t.run(async (ctx) => ctx.storage.getMetadata(storageId))).toBeNull()
+  })
+
+  it("rejects DOCX extension mismatch", async () => {
+    const t = makeT()
+    const userId = await seedUser(t)
+    const storageId = await seedStorageBlob(t, "not a zip")
+    const result = await t.withIdentity({ subject: userId }).action(api.files.finalizeUpload, {
+      storageId, filename: "evidence.docx", contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", size: 10,
+    })
+    expect(result).toMatchObject({ ok: false, code: "INVALID" })
+  })
+
+  it("accepts a valid PDF signature", async () => {
+    const t = makeT()
+    const userId = await seedUser(t)
+    const storageId = await seedStorageBlob(t, "%PDF-1.7")
+    const result = await t.withIdentity({ subject: userId }).action(api.files.finalizeUpload, {
+      storageId, filename: "evidence.pdf", contentType: "application/pdf", size: 8,
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it("accepts normal text and rejects whitespace-only text", async () => {
+    const t = makeT()
+    const userId = await seedUser(t)
+    const normalId = await seedStorageBlob(t, "normal text")
+    const accepted = await t.withIdentity({ subject: userId }).action(api.files.finalizeUpload, {
+      storageId: normalId, filename: "note.txt", contentType: "text/plain", size: 11,
+    })
+    expect(accepted.ok).toBe(true)
+    const whitespaceId = await seedStorageBlob(t, "   \n\t")
+    const rejected = await t.withIdentity({ subject: userId }).action(api.files.finalizeUpload, {
+      storageId: whitespaceId, filename: "empty.txt", contentType: "text/plain", size: 5,
+    })
+    expect(rejected).toMatchObject({ ok: false, code: "INVALID" })
+  })
+
+  it("rejects binary signatures in text files", async () => {
+    const t = makeT()
+    const userId = await seedUser(t)
+    const storageId = await seedStorageBlob(t, "%PDF-1.7")
+    const result = await t.withIdentity({ subject: userId }).action(api.files.finalizeUpload, {
+      storageId, filename: "note.txt", contentType: "text/plain", size: 8,
+    })
+    expect(result).toMatchObject({ ok: false, code: "INVALID" })
+  })
+
+  it("keeps the optional storage sha256 field compatible", async () => {
+    const t = makeT()
+    const userId = await seedUser(t)
+    const storageId = await seedStorageBlob(t, "normal text")
+    const result = await t.withIdentity({ subject: userId }).action(api.files.finalizeUpload, {
+      storageId, filename: "hash.txt", contentType: "text/plain", size: 11,
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      const record = await t.run(async (ctx) => ctx.db.get(result.fileId as Id<"files">))
+      expect(typeof record?.sha256 === "string" || record?.sha256 === undefined).toBe(true)
     }
   })
 })

@@ -31,6 +31,7 @@ export default defineSchema({
     uploadedAt: v.number(),
     // Normalizovaný formát dokumentu (pdf, docx, txt, md, csv, json). Voliteľné kvôli starším záznamom.
     format: v.optional(v.string()),
+    sha256: v.optional(v.string()),
   }).index("by_owner", ["ownerId"]),
   analyses: defineTable({
     ownerId: v.id("users"),

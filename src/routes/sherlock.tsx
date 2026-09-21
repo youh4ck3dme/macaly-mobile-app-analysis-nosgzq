@@ -5,7 +5,7 @@ import { SherlockAnalyzer } from "../components/sherlock-analyzer";
 import { Bot } from "lucide-react";
 import siteMetadata from "../metadata.json";
 
-const SITE_ORIGIN = "https://nosgzqflza19pn0bs55f4iba.macaly.app";
+const SITE_ORIGIN = "https://forenx.bizagent.sk";
 
 export const Route = createFileRoute("/sherlock")({
   head: () => {

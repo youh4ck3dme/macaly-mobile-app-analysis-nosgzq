@@ -81,7 +81,7 @@ function formatDate(ts: number): string {
 export function SherlockAnalyzer() {
   const listMyFiles = useQuery(api.files.listMyFiles, {});
   const generateUploadUrl = useMutation(api.files.generateUploadUrl);
-  const saveFileMetadata = useMutation(api.files.saveFileMetadata);
+  const finalizeUpload = useAction(api.files.finalizeUpload);
   const listMyAnalyses = useQuery(api.analyses.listMyAnalyses, {});
   const removeAnalysis = useMutation(api.analyses.remove);
   const runAnalyze = useAction(api.analyze.analyze);
@@ -109,10 +109,6 @@ export function SherlockAnalyzer() {
   const analyses = listMyAnalyses?.ok ? listMyAnalyses.analyses : [];
   const analysesLoading = listMyAnalyses === undefined;
 
-  // Aktívna analýza: beží akcia, alebo čakáme na výsledok identified analýzy.
-  const awaitingResult = currentAnalysis !== null && currentAnalysis.data === null;
-  const showAnalysisProgress = running || awaitingResult;
-
   // Trvalý záznam analýzy zo servera – zdroj pravdy o priebehu.
   const trackedRecord = currentAnalysis
     ? analyses.find((a) => a._id === currentAnalysis.id)
@@ -120,6 +116,20 @@ export function SherlockAnalyzer() {
   const persistedProgress =
     typeof trackedRecord?.progress === "number" ? trackedRecord.progress : null;
   const persistedLabel = trackedRecord?.progressLabel ?? null;
+
+  // Výsledok sa zobrazí, akonáhle ho vráti akcia alebo ho hlási server,
+  // vrátane zlyhanej analýzy, ktorej chyba sa má ukázať v tomto bloku.
+  const trackedData = (trackedRecord?.data ?? null) as SherlockAnalysis | null;
+  const trackedError =
+    trackedRecord?.status === "error"
+      ? (trackedRecord.errorMessage ?? "Analýza zlyhala.")
+      : null;
+  const displayData = currentAnalysis ? (currentAnalysis.data ?? trackedData) : null;
+  const displayedError = runError ?? trackedError;
+
+  // Aktívna analýza: beží akcia, alebo čakáme na výsledok identified analýzy.
+  const awaitingResult = currentAnalysis !== null && displayData === null && displayedError === null;
+  const showAnalysisProgress = running || awaitingResult;
 
   const toggleSandbox = (id: Id<"files">) => {
     setSelectedSandboxIds((prev) =>
@@ -202,7 +212,7 @@ export function SherlockAnalyzer() {
       });
       const response = JSON.parse(xhr.responseText) as { storageId?: string };
       if (!response.storageId) throw new Error("Server nevrátil ID súboru.");
-      const saveResult = await saveFileMetadata({
+      const saveResult = await finalizeUpload({
         storageId: response.storageId as Id<"_storage">,
         filename: selectedFile.name,
         contentType,
@@ -546,13 +556,13 @@ export function SherlockAnalyzer() {
         <div
           className="space-y-2 rounded-xl border border-border bg-card p-4"
           data-testid="sherlock-analysis-progress"
-          data-state={runError ? "error" : "loading"}
+          data-state={displayedError ? "error" : "loading"}
           aria-live="polite"
         >
-          {runError ? (
+          {displayedError ? (
             <div className="flex items-start gap-2 text-sm text-destructive">
               <AlertCircle className="mt-0.5 size-5 shrink-0" />
-              <span>{runError}</span>
+              <span>{displayedError}</span>
             </div>
           ) : (
             <>
@@ -594,10 +604,10 @@ export function SherlockAnalyzer() {
         </div>
       )}
 
-      {runError && !showAnalysisProgress && (
+      {displayedError && !showAnalysisProgress && (
         <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive" data-testid="sherlock-run-error">
           <AlertCircle className="mt-0.5 size-5 shrink-0" />
-          <span>{runError}</span>
+          <span>{displayedError}</span>
         </div>
       )}
 
@@ -618,8 +628,8 @@ export function SherlockAnalyzer() {
               <X className="size-4" />
             </button>
           </div>
-          {currentAnalysis.data ? (
-            <SherlockResults analysis={currentAnalysis.data} />
+          {displayData ? (
+            <SherlockResults analysis={displayData} />
           ) : !showAnalysisProgress ? (
             <div
               className="flex items-center gap-3 rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground"
