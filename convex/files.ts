@@ -1,7 +1,9 @@
 import { v } from "convex/values";
-import { query, mutation, internalQuery } from "./_generated/server";
+import { query, mutation, action, internalMutation, internalQuery } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { getAuthUserId } from "@convex-dev/auth/server";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 
 type GenerateResult =
   | { ok: true; uploadUrl: string }
@@ -14,10 +16,15 @@ type SaveResult =
 // Server-side file upload constraints. Mirrored from the client so the limits
 // cannot be bypassed by calling the Convex mutation directly.
 const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200 MB
+// OCR-obrázkový limit (PNG/JPG nad tento limit nie je možné spoľahlivo rozpoznať).
+const IMAGE_OCR_MAX_BYTES = 20 * 1024 * 1024; // 20 MB
 // Povolené prípony mapované na normalizovaný formát uložený v databáze.
 const ALLOWED_EXTENSIONS: Record<string, string> = {
   ".pdf": "pdf",
   ".docx": "docx",
+  ".png": "png",
+  ".jpg": "jpg",
+  ".jpeg": "jpg",
   ".txt": "txt",
   ".md": "md",
   ".csv": "csv",
@@ -72,84 +79,84 @@ export const generateUploadUrl = mutation({
   },
 });
 
+async function validateAndInsertFile(
+  ctx: MutationCtx,
+  args: { ownerId: Id<"users">; storageId: Id<"_storage">; filename: string; contentType: string },
+): Promise<SaveResult> {
+  const filename = args.filename.trim();
+  if (!filename) return { ok: false, code: "INVALID", message: "Názov súboru je povinný." };
+  const format = getFormatFromFilename(filename);
+  if (!format) return { ok: false, code: "INVALID", message: "Nepodporovaný typ súboru. Povolené sú iba súbory PDF, DOCX, PNG, JPG, TXT, MD, CSV a JSON." };
+  const metadata = await ctx.storage.getMetadata(args.storageId);
+  if (!metadata) return { ok: false, code: "INVALID", message: "Nahraný súbor sa nepodarilo overiť. Skúste ho nahrať znova." };
+  const actualSize = metadata.size;
+  if (typeof actualSize !== "number" || !Number.isFinite(actualSize) || actualSize <= 0) {
+    return { ok: false, code: "INVALID", message: "Veľkosť súboru nie je platná." };
+  }
+  if (actualSize > MAX_FILE_SIZE) {
+    await ctx.storage.delete(args.storageId);
+    return { ok: false, code: "INVALID", message: `Súbor je príliš veľký. Maximálna veľkosť je 200 MB (tento má ${formatBytes(actualSize)}).` };
+  }
+  const fileId = await ctx.db.insert("files", {
+    ownerId: args.ownerId, storageId: args.storageId, filename, contentType: args.contentType,
+    size: actualSize, uploadedAt: Date.now(), format,
+    ...(metadata.sha256 ? { sha256: metadata.sha256 } : {}),
+  });
+  return { ok: true, fileId };
+}
+
+export const insertFileRecord = internalMutation({
+  args: { ownerId: v.id("users"), storageId: v.id("_storage"), filename: v.string(), contentType: v.string() },
+  handler: async (ctx, args): Promise<SaveResult> => validateAndInsertFile(ctx, args),
+});
+
+/** @deprecated use finalizeUpload */
 export const saveFileMetadata = mutation({
-  args: {
-    storageId: v.id("_storage"),
-    filename: v.string(),
-    contentType: v.string(),
-    size: v.number(),
-  },
+  args: { storageId: v.id("_storage"), filename: v.string(), contentType: v.string(), size: v.number() },
   handler: async (ctx, args): Promise<SaveResult> => {
     const userId = await getAuthUserId(ctx);
-    if (!userId) {
-      return {
-        ok: false,
-        code: "UNAUTHENTICATED",
-        message: "Musíte byť prihlásený.",
-      };
-    }
+    if (!userId) return { ok: false, code: "UNAUTHENTICATED", message: "Musíte byť prihlásený." };
+    return validateAndInsertFile(ctx, { ...args, ownerId: userId });
+  },
+});
+
+type FinalizeUploadResult = SaveResult;
+
+export const finalizeUpload = action({
+  args: { storageId: v.id("_storage"), filename: v.string(), contentType: v.string(), size: v.number() },
+  handler: async (ctx, args): Promise<FinalizeUploadResult> => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return { ok: false, code: "UNAUTHENTICATED", message: "Musíte byť prihlásený." };
     const filename = args.filename.trim();
-    if (!filename) {
-      return {
-        ok: false,
-        code: "INVALID",
-        message: "Názov súboru je povinný.",
-      };
-    }
-    // Enforce the extension allow-list on the server so the client-side
-    // checks cannot be bypassed via a direct mutation call. The browser
-    // content type is never trusted; the format is derived from the filename.
+    if (!filename) return { ok: false, code: "INVALID", message: "Názov súboru je povinný." };
     const format = getFormatFromFilename(filename);
-    if (!format) {
-      return {
-        ok: false,
-        code: "INVALID",
-        message:
-          "Nepodporovaný typ súboru. Povolené sú iba súbory PDF, DOCX, TXT, MD, CSV a JSON.",
-      };
-    }
-    // Never trust the client-reported size: the upload goes directly to file
-    // storage before this mutation runs, so the only reliable gate is the
-    // actual blob size from Convex storage metadata. Oversized or
-    // unverifiable blobs are rejected and the stored object is deleted.
-    const metadata = await ctx.storage.getMetadata(args.storageId);
-    if (!metadata) {
-      return {
-        ok: false,
-        code: "INVALID",
-        message: "Nahraný súbor sa nepodarilo overiť. Skúste ho nahrať znova.",
-      };
-    }
-    const actualSize = metadata.size;
-    if (
-      typeof actualSize !== "number" ||
-      !Number.isFinite(actualSize) ||
-      actualSize <= 0
-    ) {
-      return {
-        ok: false,
-        code: "INVALID",
-        message: "Veľkosť súboru nie je platná.",
-      };
-    }
-    if (actualSize > MAX_FILE_SIZE) {
+    if (!format) return { ok: false, code: "INVALID", message: "Nepodporovaný typ súboru. Povolené sú iba súbory PDF, DOCX, PNG, JPG, TXT, MD, CSV a JSON." };
+    const blob = await ctx.storage.get(args.storageId);
+    if (!blob) return { ok: false, code: "INVALID", message: "Nahraný súbor sa nepodarilo overiť. Skúste ho nahrať znova." };
+    const firstBytes = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+    const startsWith = (signature: number[]) => signature.every((byte, index) => firstBytes[index] === byte);
+    const pdfSignature = [0x25, 0x50, 0x44, 0x46, 0x2d];
+    const zipSignature = [0x50, 0x4b, 0x03, 0x04];
+    const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    const jpgSignature = [0xff, 0xd8, 0xff];
+    // Binárne podpisy odmietané v textových formátoch (PNG/JPEG ostávajú v tomto zozname).
+    const binarySignatures = [pdfSignature, zipSignature, pngSignature, jpgSignature, [0x7f, 0x45, 0x4c, 0x46], [0x47, 0x49, 0x46, 0x38], [0x1f, 0x8b]];
+    const isImage = format === "png" || format === "jpg";
+    const isContentValid = format === "pdf" ? startsWith(pdfSignature) : format === "docx" ? startsWith(zipSignature) : isImage ? (format === "png" ? startsWith(pngSignature) : startsWith(jpgSignature)) : !binarySignatures.some(startsWith);
+    if (!isContentValid) {
       await ctx.storage.delete(args.storageId);
-      return {
-        ok: false,
-        code: "INVALID",
-        message: `Súbor je príliš veľký. Maximálna veľkosť je 200 MB (tento má ${formatBytes(actualSize)}).`,
-      };
+      return { ok: false, code: "INVALID", message: "Obsah súboru nezodpovedá jeho prípone." };
     }
-    const fileId = await ctx.db.insert("files", {
-      ownerId: userId,
-      storageId: args.storageId,
-      filename,
-      contentType: args.contentType,
-      size: actualSize,
-      uploadedAt: Date.now(),
-      format,
-    });
-    return { ok: true, fileId };
+    // OCR-obrázky nad 20 MB neprejdú rozpoznávaním textu; odmietnuť ich rovno pri zbere.
+    if (isImage && blob.size > IMAGE_OCR_MAX_BYTES) {
+      await ctx.storage.delete(args.storageId);
+      return { ok: false, code: "INVALID", message: `Obrázok je príliš veľký pre rozpoznávanie textu. Maximum je 20 MB (tento má ${formatBytes(blob.size)}).` };
+    }
+    if (["txt", "md", "csv", "json"].includes(format) && blob.size <= 1_000_000 && !(await blob.text()).trim()) {
+      await ctx.storage.delete(args.storageId);
+      return { ok: false, code: "INVALID", message: "Textový súbor nesmie byť prázdny alebo obsahovať iba medzery." };
+    }
+    return await ctx.runMutation(internal.files.insertFileRecord, { ownerId: userId, storageId: args.storageId, filename, contentType: args.contentType });
   },
 });
 

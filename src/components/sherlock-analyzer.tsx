@@ -37,19 +37,24 @@ const SUPPORTED_FORMATS = {
   md: { mime: "text/markdown", label: "MD" },
   csv: { mime: "text/csv", label: "CSV" },
   json: { mime: "application/json", label: "JSON" },
+  png: { mime: "image/png", label: "PNG" },
+  jpg: { mime: "image/jpeg", label: "JPG" },
 } as const;
 
-const FILE_ACCEPT = Object.entries(SUPPORTED_FORMATS)
+const FILE_ACCEPT = `${Object.entries(SUPPORTED_FORMATS)
   .map(([ext, f]) => `.${ext},${f.mime}`)
-  .join(",");
+  .join(",")},.jpeg`;
 
-const SUPPORTED_FORMATS_TEXT = "PDF, DOCX, TXT, MD, CSV, JSON";
+const SUPPORTED_FORMATS_TEXT = "PDF, DOCX, TXT, MD, CSV, JSON, PNG, JPG";
+// Rozpoznávanie textu v obrázkoch (OCR) má nižší limit; backend ho vynucuje rovnako.
+const IMAGE_MAX_SIZE = 20 * 1024 * 1024; // 20 MB
 const LARGE_FILE_NOTE = "Po nahratí bude obsah spracovaný v dvoch analytických častiach.";
 
 function detectFormat(file: File): string | null {
   const name = file.name.toLowerCase();
   const dot = name.lastIndexOf(".");
-  const ext = dot >= 0 ? name.slice(dot + 1) : "";
+  const rawExt = dot >= 0 ? name.slice(dot + 1) : "";
+  const ext = rawExt === "jpeg" ? "jpg" : rawExt;
   if (ext in SUPPORTED_FORMATS) return ext;
   const entry = Object.entries(SUPPORTED_FORMATS).find(([, f]) => f.mime === file.type);
   return entry ? entry[0] : null;
@@ -70,6 +75,30 @@ function formatBytes(bytes: number): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
+type MappedAnalysisState = {
+  state: "in-progress" | "done" | "error";
+  label: string;
+};
+
+// Mapuje nové (queued/processing/succeeded/failed) aj staré (analyzing/ready/error) stavy.
+function mapAnalysisState(status: string | undefined): MappedAnalysisState {
+  switch (status) {
+    case "queued":
+      return { state: "in-progress", label: "vo fronte" };
+    case "processing":
+    case "analyzing":
+      return { state: "in-progress", label: "analyzuje sa" };
+    case "succeeded":
+    case "ready":
+      return { state: "done", label: "hotová" };
+    case "failed":
+    case "error":
+      return { state: "error", label: "chyba" };
+    default:
+      return { state: "in-progress", label: "analyzuje sa" };
+  }
+}
+
 function formatDate(ts: number): string {
   return new Date(ts).toLocaleDateString("cs-CZ", {
     day: "2-digit",
@@ -81,7 +110,7 @@ function formatDate(ts: number): string {
 export function SherlockAnalyzer() {
   const listMyFiles = useQuery(api.files.listMyFiles, {});
   const generateUploadUrl = useMutation(api.files.generateUploadUrl);
-  const saveFileMetadata = useMutation(api.files.saveFileMetadata);
+  const finalizeUpload = useAction(api.files.finalizeUpload);
   const listMyAnalyses = useQuery(api.analyses.listMyAnalyses, {});
   const removeAnalysis = useMutation(api.analyses.remove);
   const runAnalyze = useAction(api.analyze.analyze);
@@ -109,10 +138,6 @@ export function SherlockAnalyzer() {
   const analyses = listMyAnalyses?.ok ? listMyAnalyses.analyses : [];
   const analysesLoading = listMyAnalyses === undefined;
 
-  // Aktívna analýza: beží akcia, alebo čakáme na výsledok identified analýzy.
-  const awaitingResult = currentAnalysis !== null && currentAnalysis.data === null;
-  const showAnalysisProgress = running || awaitingResult;
-
   // Trvalý záznam analýzy zo servera – zdroj pravdy o priebehu.
   const trackedRecord = currentAnalysis
     ? analyses.find((a) => a._id === currentAnalysis.id)
@@ -120,6 +145,20 @@ export function SherlockAnalyzer() {
   const persistedProgress =
     typeof trackedRecord?.progress === "number" ? trackedRecord.progress : null;
   const persistedLabel = trackedRecord?.progressLabel ?? null;
+
+  // Výsledok sa zobrazí, akonáhle ho vráti akcia alebo ho hlási server,
+  // vrátane zlyhanej analýzy, ktorej chyba sa má ukázať v tomto bloku.
+  const trackedData = (trackedRecord?.data ?? null) as SherlockAnalysis | null;
+  const trackedError =
+    mapAnalysisState(trackedRecord?.status).state === "error" && trackedRecord
+      ? (trackedRecord.errorMessage ?? "Analýza zlyhala.")
+      : null;
+  const displayData = currentAnalysis ? (currentAnalysis.data ?? trackedData) : null;
+  const displayedError = runError ?? trackedError;
+
+  // Aktívna analýza: beží akcia, alebo čakáme na výsledok identified analýzy.
+  const awaitingResult = currentAnalysis !== null && displayData === null && displayedError === null;
+  const showAnalysisProgress = running || awaitingResult;
 
   const toggleSandbox = (id: Id<"files">) => {
     setSelectedSandboxIds((prev) =>
@@ -129,8 +168,13 @@ export function SherlockAnalyzer() {
   };
 
   const validateFile = (file: File): string | null => {
-    if (!detectFormat(file)) {
+    const detected = detectFormat(file);
+    if (!detected) {
       return `Nepodporovaný formát súboru. Povolené formáty sú ${SUPPORTED_FORMATS_TEXT}.`;
+    }
+    const isImage = detected === "png" || detected === "jpg";
+    if (isImage && file.size > IMAGE_MAX_SIZE) {
+      return `Obrázok je príliš veľký pre rozpoznávanie textu. Maximum je 20 MB (tento má ${formatBytes(file.size)}).`;
     }
     if (file.size > MAX_FILE_SIZE) {
       return `Súbor je príliš veľký. Maximálna veľkosť je 200 MB (tento má ${formatBytes(file.size)}).`;
@@ -202,7 +246,7 @@ export function SherlockAnalyzer() {
       });
       const response = JSON.parse(xhr.responseText) as { storageId?: string };
       if (!response.storageId) throw new Error("Server nevrátil ID súboru.");
-      const saveResult = await saveFileMetadata({
+      const saveResult = await finalizeUpload({
         storageId: response.storageId as Id<"_storage">,
         filename: selectedFile.name,
         contentType,
@@ -423,6 +467,9 @@ export function SherlockAnalyzer() {
               <p className="text-xs text-muted-foreground">
                 Podporované formáty: {SUPPORTED_FORMATS_TEXT} • Max. 200 MB
               </p>
+              <p className="text-xs text-muted-foreground">
+                Text sa z obrázkov a skenovaných PDF číta pomocou OCR.
+              </p>
             </div>
           </div>
 
@@ -546,13 +593,13 @@ export function SherlockAnalyzer() {
         <div
           className="space-y-2 rounded-xl border border-border bg-card p-4"
           data-testid="sherlock-analysis-progress"
-          data-state={runError ? "error" : "loading"}
+          data-state={displayedError ? "error" : "loading"}
           aria-live="polite"
         >
-          {runError ? (
+          {displayedError ? (
             <div className="flex items-start gap-2 text-sm text-destructive">
               <AlertCircle className="mt-0.5 size-5 shrink-0" />
-              <span>{runError}</span>
+              <span>{displayedError}</span>
             </div>
           ) : (
             <>
@@ -594,10 +641,10 @@ export function SherlockAnalyzer() {
         </div>
       )}
 
-      {runError && !showAnalysisProgress && (
+      {displayedError && !showAnalysisProgress && (
         <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive" data-testid="sherlock-run-error">
           <AlertCircle className="mt-0.5 size-5 shrink-0" />
-          <span>{runError}</span>
+          <span>{displayedError}</span>
         </div>
       )}
 
@@ -618,8 +665,8 @@ export function SherlockAnalyzer() {
               <X className="size-4" />
             </button>
           </div>
-          {currentAnalysis.data ? (
-            <SherlockResults analysis={currentAnalysis.data} />
+          {displayData ? (
+            <SherlockResults analysis={displayData} />
           ) : !showAnalysisProgress ? (
             <div
               className="flex items-center gap-3 rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground"
@@ -672,19 +719,15 @@ export function SherlockAnalyzer() {
                       <p className="truncate text-sm font-medium">{a.name}</p>
                       <p className="text-xs text-muted-foreground">
                         {formatDate(a.createdAt)} • {a.fileIds.length} súbor(ov) •{" "}
-                        {a.status === "ready"
-                          ? "hotová"
-                          : a.status === "analyzing"
-                            ? "analyzuje sa"
-                            : "chyba"}
+                        {mapAnalysisState(a.status).label}
                       </p>
-                      {a.status === "error" && a.errorMessage && (
+                      {mapAnalysisState(a.status).state === "error" && a.errorMessage && (
                         <p className="mt-1 text-xs text-destructive">{a.errorMessage}</p>
                       )}
                     </button>
                   </div>
                   <ExternalLink className="size-4 shrink-0 text-muted-foreground" />
-                  {a.status !== "analyzing" && (
+                  {mapAnalysisState(a.status).state !== "in-progress" && (
                     <button
                       type="button"
                       onClick={() => void removeAnalysis({ analysisId: a._id })}

@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from "react";
 import type { ChangeEvent, DragEvent } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import {
@@ -29,19 +29,24 @@ const SUPPORTED_FORMATS = {
   md: { mime: "text/markdown", label: "MD" },
   csv: { mime: "text/csv", label: "CSV" },
   json: { mime: "application/json", label: "JSON" },
+  png: { mime: "image/png", label: "PNG" },
+  jpg: { mime: "image/jpeg", label: "JPG" },
 } as const;
 
-const FILE_ACCEPT = Object.entries(SUPPORTED_FORMATS)
+const FILE_ACCEPT = `${Object.entries(SUPPORTED_FORMATS)
   .map(([ext, f]) => `.${ext},${f.mime}`)
-  .join(",");
+  .join(",")},.jpeg`;
 
-const SUPPORTED_FORMATS_TEXT = "PDF, DOCX, TXT, MD, CSV, JSON";
+const SUPPORTED_FORMATS_TEXT = "PDF, DOCX, TXT, MD, CSV, JSON, PNG, JPG";
+// Rozpoznávanie textu v obrázkoch (OCR) má nižší limit; backend ho vynucuje rovnako.
+const IMAGE_MAX_SIZE = 20 * 1024 * 1024; // 20 MB
 const LARGE_FILE_NOTE = "Po nahratí bude obsah spracovaný v dvoch analytických častiach.";
 
 function detectFormat(file: File): string | null {
   const name = file.name.toLowerCase();
   const dot = name.lastIndexOf(".");
-  const ext = dot >= 0 ? name.slice(dot + 1) : "";
+  const rawExt = dot >= 0 ? name.slice(dot + 1) : "";
+  const ext = rawExt === "jpeg" ? "jpg" : rawExt;
   if (ext in SUPPORTED_FORMATS) return ext;
   const entry = Object.entries(SUPPORTED_FORMATS).find(([, f]) => f.mime === file.type);
   return entry ? entry[0] : null;
@@ -72,7 +77,7 @@ function formatDate(ts: number): string {
 
 export function PdfSandboxUpload() {
   const generateUploadUrl = useMutation(api.files.generateUploadUrl);
-  const saveFileMetadata = useMutation(api.files.saveFileMetadata);
+  const finalizeUpload = useAction(api.files.finalizeUpload);
   const removeFile = useMutation(api.files.remove);
   const filesResult = useQuery(api.files.listMyFiles, {});
 
@@ -89,8 +94,13 @@ export function PdfSandboxUpload() {
   const files = filesResult?.ok ? filesResult.files : [];
 
   const validateFile = (file: File): string | null => {
-    if (!detectFormat(file)) {
+    const detected = detectFormat(file);
+    if (!detected) {
       return `Nepodporovaný formát súboru. Povolené formáty sú ${SUPPORTED_FORMATS_TEXT}.`;
+    }
+    const isImage = detected === "png" || detected === "jpg";
+    if (isImage && file.size > IMAGE_MAX_SIZE) {
+      return `Obrázok je príliš veľký pre rozpoznávanie textu. Maximum je 20 MB (tento má ${formatBytes(file.size)}).`;
     }
     if (file.size > MAX_FILE_SIZE) {
       return `Súbor je príliš veľký. Maximálna veľkosť je 200 MB (tento má ${formatBytes(file.size)}).`;
@@ -187,7 +197,7 @@ export function PdfSandboxUpload() {
         throw new Error("Server nevrátil ID uloženého súboru.");
       }
 
-      const saveResult = await saveFileMetadata({
+      const saveResult = await finalizeUpload({
         storageId: storageId as Id<"_storage">,
         filename: selectedFile.name,
         contentType,
@@ -250,6 +260,9 @@ export function PdfSandboxUpload() {
           </p>
           <p className="text-xs text-muted-foreground">
             Podporované formáty: {SUPPORTED_FORMATS_TEXT} • Max. 200 MB
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Text sa z obrázkov a skenovaných PDF číta pomocou OCR.
           </p>
         </div>
       </div>

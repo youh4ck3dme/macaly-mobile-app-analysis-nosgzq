@@ -31,21 +31,34 @@ export default defineSchema({
     uploadedAt: v.number(),
     // Normalizovaný formát dokumentu (pdf, docx, txt, md, csv, json). Voliteľné kvôli starším záznamom.
     format: v.optional(v.string()),
+    sha256: v.optional(v.string()),
   }).index("by_owner", ["ownerId"]),
   analyses: defineTable({
     ownerId: v.id("users"),
     fileIds: v.array(v.id("files")),
     name: v.string(),
     data: v.optional(v.any()),
+    // Legacy stavy (analyzing/ready/error) ostanú platné, nový stavový automat
+    // pridáva frontu (queued/processing) a výsledky (succeeded/failed).
     status: v.union(
       v.literal("analyzing"),
       v.literal("ready"),
       v.literal("error"),
+      v.literal("queued"),
+      v.literal("processing"),
+      v.literal("succeeded"),
+      v.literal("failed"),
     ),
     errorMessage: v.optional(v.string()),
     // Priebeh analýzy v percentách (0-100) a krátky popis aktuálnej fázy.
     progress: v.optional(v.number()),
     progressLabel: v.optional(v.string()),
+    // Predĺžené polia pre stavový automat analýzy (opakovania, časové značky, kvalita).
+    attempts: v.optional(v.number()),
+    startedAt: v.optional(v.number()),
+    finishedAt: v.optional(v.number()),
+    partial: v.optional(v.boolean()),
+    warnings: v.optional(v.array(v.string())),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

@@ -10,6 +10,7 @@
 
 import type * as ResendOTP from "../ResendOTP.js";
 import type * as analyses from "../analyses.js";
+import type * as analysisNormalize from "../analysisNormalize.js";
 import type * as analyze from "../analyze.js";
 import type * as auth from "../auth.js";
 import type * as cases from "../cases.js";
@@ -17,6 +18,7 @@ import type * as files from "../files.js";
 import type * as http from "../http.js";
 import type * as macaly from "../macaly.js";
 import type * as mistral from "../mistral.js";
+import type * as mistralHealth from "../mistralHealth.js";
 import type * as settings from "../settings.js";
 import type * as users from "../users.js";
 
@@ -29,6 +31,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   ResendOTP: typeof ResendOTP;
   analyses: typeof analyses;
+  analysisNormalize: typeof analysisNormalize;
   analyze: typeof analyze;
   auth: typeof auth;
   cases: typeof cases;
@@ -36,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   macaly: typeof macaly;
   mistral: typeof mistral;
+  mistralHealth: typeof mistralHealth;
   settings: typeof settings;
   users: typeof users;
 }>;
