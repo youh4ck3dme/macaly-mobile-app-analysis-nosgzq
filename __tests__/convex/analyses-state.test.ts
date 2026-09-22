@@ -41,7 +41,7 @@ describe("analyses state machine", () => {
 
     const result = await t
       .withIdentity({ subject: userId })
-      .mutation(api.analyze.enqueue, { fileIds: [fileId] })
+      .mutation(api.analyzeEnqueue.enqueue, { fileIds: [fileId] })
 
     expect(result.ok).toBe(true)
     const rows = await listAnalyses(t)
@@ -60,10 +60,10 @@ describe("analyses state machine", () => {
 
     const first = await t
       .withIdentity({ subject: userId })
-      .mutation(api.analyze.enqueue, { fileIds: [fileId] })
+      .mutation(api.analyzeEnqueue.enqueue, { fileIds: [fileId] })
     const second = await t
       .withIdentity({ subject: userId })
-      .mutation(api.analyze.enqueue, { fileIds: [fileId] })
+      .mutation(api.analyzeEnqueue.enqueue, { fileIds: [fileId] })
 
     if (!first.ok || !second.ok) throw new Error("enqueue should succeed")
     expect(second.analysisId).toBe(first.analysisId)
@@ -80,7 +80,7 @@ describe("analyses state machine", () => {
 
     const result = await t
       .withIdentity({ subject: userId })
-      .mutation(api.analyze.enqueue, { fileIds: [foreignFile] })
+      .mutation(api.analyzeEnqueue.enqueue, { fileIds: [foreignFile] })
 
     if (result.ok) throw new Error("enqueue should fail")
     expect(result.code).toBe("FORBIDDEN")
