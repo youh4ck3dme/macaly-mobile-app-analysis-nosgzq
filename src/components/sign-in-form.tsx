@@ -61,6 +61,9 @@ export function SignInForm() {
             <p className="text-sm text-muted-foreground">
               Overovací kód sme poslali na {email}
             </p>
+            <p className="text-sm text-muted-foreground">
+              Pri lokálnom Convex backende je kód v logu servera ako [DEV OTP].
+            </p>
           </div>
           {error && (
             <p className="text-sm text-destructive" role="alert">

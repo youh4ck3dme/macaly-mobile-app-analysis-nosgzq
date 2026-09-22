@@ -23,6 +23,11 @@
 .local
 .lesshst
 
+# env and secrets — keep .env.example, never commit .env.local
+.env
+.env.*
+!.env.example
+
 # archives
 *.zip
 *.tar.gz
