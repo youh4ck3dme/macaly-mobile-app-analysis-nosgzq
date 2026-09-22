@@ -55,8 +55,7 @@ describe("SherlockResults export", () => {
     expect(screen.getByTestId("export-json")).toBeDisabled();
   });
 
-  it("downloads the exported JSON and revokes its object URL", async () => {
-    vi.useFakeTimers();
+  it("downloads the exported JSON and revokes its object URL", () => {
     const createObjectURL = vi.fn(() => "blob:test");
     const revokeObjectURL = vi.fn();
     vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
@@ -65,9 +64,7 @@ describe("SherlockResults export", () => {
     fireEvent.click(screen.getByTestId("export-json"));
 
     expect(createObjectURL).toHaveBeenCalledOnce();
-    await vi.runAllTimersAsync();
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:test");
-    vi.useRealTimers();
   });
 });
 
@@ -101,5 +98,123 @@ describe("SherlockResults s poškodenými dátami", () => {
     expect(payload.relationships).toHaveLength(1);
     expect(payload.timeline).toHaveLength(1);
     expect(payload.metadata).toEqual(malformedAnalysis.metadata);
+  });
+});
+
+describe("SherlockResults provenancia a integrita", () => {
+  const provenanced: SherlockAnalysis = {
+    metadata: { document_name: "Listina.pdf" },
+    persons: [],
+    evidence: [],
+    relationships: [],
+    timeline: [
+      {
+        id: "T001",
+        title: "Podpis listiny",
+        timestamp: "2024-01-01T10:00:00Z",
+        provenance: {
+          document: "Listina.pdf",
+          page: 3,
+          section: "podpisy",
+          excerpt: "…upravené o 10:05",
+          method: "pdf-text",
+          verified: true,
+        },
+        kind: "observation",
+      },
+    ],
+    sources: [
+      {
+        document: "Listina.pdf",
+        method: "pdf-text",
+        pages: 5,
+        sha256: "a1b2c3d4e5f6789012345678",
+        integrityNote:
+          "SHA-256 potvrdzuje nemennosť bajtov súboru, nie pravosť ani pôvod dokumentu.",
+      },
+    ],
+    quality: {
+      partial: true,
+      materiallyValid: true,
+      droppedItems: 2,
+      warnings: [
+        "Vynechané 2 neplatné položky v sekcii persons.",
+        "w2",
+        "w3",
+        "w4",
+        "w5",
+        "w6",
+        "w7",
+      ],
+    },
+  };
+
+  it("pre overené zistenie zobrazí provenanciu a Pozorovanie", () => {
+    render(<SherlockResults analysis={provenanced} />);
+    const line = screen.getAllByTestId("finding-provenance")[0];
+    expect(line).toHaveTextContent("Listina.pdf");
+    expect(line).toHaveTextContent("str. 3");
+    expect(line).toHaveTextContent("textová vrstva PDF");
+    expect(screen.getAllByTestId("finding-kind")[0]).toHaveTextContent("Pozorovanie");
+    expect(screen.queryByTestId("finding-unverified")).toBeNull();
+  });
+
+  it("neoverené zistenie má Hypotézu AI a Neoverenú citáciu", () => {
+    render(
+      <SherlockResults
+        analysis={{
+          persons: [],
+          evidence: [],
+          relationships: [],
+          timeline: [
+            {
+              id: "T001",
+              title: "Podozrenie",
+              timestamp: null,
+              provenance: {
+                document: null,
+                page: null,
+                section: null,
+                excerpt: "krajná veta",
+                method: null,
+                verified: false,
+              },
+              kind: "hypothesis",
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getAllByTestId("finding-kind")[0]).toHaveTextContent("Hypotéza AI");
+    expect(screen.getByTestId("finding-unverified")).toHaveTextContent("Neoverená citácia");
+    expect(screen.getByTestId("finding-provenance")).toHaveTextContent("strana neznáma");
+  });
+
+  it("čiastočný výsledok zobrazí banner s výstrahami", () => {
+    render(<SherlockResults analysis={provenanced} />);
+    const banner = screen.getByTestId("sherlock-partial");
+    expect(banner).toHaveTextContent("čiastočný");
+    expect(banner).toHaveTextContent("Vynechané 2 neplatné položky v sekcii persons.");
+    expect(banner).toHaveTextContent("+2 ďalších");
+  });
+
+  it("zdroje nesú overovaciu poznámku a SHA-256 prefix", () => {
+    render(<SherlockResults analysis={provenanced} />);
+    const sources = screen.getByTestId("sherlock-sources");
+    expect(sources).toHaveTextContent(
+      "SHA-256 potvrdzuje nemennosť bajtov súboru, nie pravosť ani pôvod dokumentu.",
+    );
+    expect(sources).toHaveTextContent("SHA-256: a1b2c3d4e5f6…");
+    expect(sources).toHaveTextContent("5 stránok");
+  });
+
+  it("export obsahuje provenanciu, kind, sources a quality", () => {
+    const payload = JSON.parse(buildAnalysisExport(provenanced, "Listina").json);
+    expect(payload.timeline[0].provenance.verified).toBe(true);
+    expect(payload.timeline[0].kind).toBe("observation");
+    expect(payload.sources[0].integrityNote).toContain("SHA-256 potvrdzuje nemennosť bajtov");
+    expect(payload.quality.partial).toBe(true);
+    expect(payload.exportedAt).toBeTruthy();
+    expect(payload.name).toBe("Listina");
   });
 });

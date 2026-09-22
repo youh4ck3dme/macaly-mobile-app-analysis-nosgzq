@@ -363,3 +363,117 @@ describe("files.saveFileMetadata - server-side validation", () => {
     }
   })
 })
+
+describe("files.finalizeUpload - image formats", () => {
+  const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+  const JPEG_SIGNATURE = [0xff, 0xd8, 0xff]
+
+  function imageBytes(signature: number[], totalSize: number): Uint8Array {
+    const bytes = new Uint8Array(totalSize)
+    signature.forEach((byte, index) => {
+      bytes[index] = byte
+    })
+    for (let i = signature.length; i < totalSize; i++) {
+      bytes[i] = 0x42
+    }
+    return bytes
+  }
+
+  async function seedImageBlob(t: ReturnType<typeof makeT>, bytes: Uint8Array) {
+    return await t.run(async (ctx) => {
+      return (await (ctx as any).storage.store(new Blob([bytes as unknown as BlobPart], { type: "image/png" }))) as Id<"_storage">
+    })
+  }
+
+  it("accepts a valid PNG and stores format png", async () => {
+    const t = makeT()
+    const userId = await seedUser(t)
+    const storageId = await seedImageBlob(t, imageBytes(PNG_SIGNATURE, 2048))
+
+    const result = await t.withIdentity({ subject: userId }).action(api.files.finalizeUpload, {
+      storageId, filename: "scan.png", contentType: "image/png", size: 2048,
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      const record = await t.run(async (ctx) => ctx.db.get(result.fileId as Id<"files">))
+      expect(record?.format).toBe("png")
+    }
+  })
+
+  it("accepts a valid JPEG with a .jpg filename and stores format jpg", async () => {
+    const t = makeT()
+    const userId = await seedUser(t)
+    const storageId = await seedImageBlob(t, imageBytes(JPEG_SIGNATURE, 2048))
+
+    const result = await t.withIdentity({ subject: userId }).action(api.files.finalizeUpload, {
+      storageId, filename: "photo.jpg", contentType: "image/jpeg", size: 2048,
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      const record = await t.run(async (ctx) => ctx.db.get(result.fileId as Id<"files">))
+      expect(record?.format).toBe("jpg")
+    }
+  })
+
+  it("accepts a valid JPEG when the filename ends with .jpeg", async () => {
+    const t = makeT()
+    const userId = await seedUser(t)
+    const storageId = await seedImageBlob(t, imageBytes(JPEG_SIGNATURE, 2048))
+
+    const result = await t.withIdentity({ subject: userId }).action(api.files.finalizeUpload, {
+      storageId, filename: "photo.jpeg", contentType: "image/jpeg", size: 2048,
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      const record = await t.run(async (ctx) => ctx.db.get(result.fileId as Id<"files">))
+      expect(record?.format).toBe("jpg")
+    }
+  })
+
+  it("rejects a text file renamed to .png, deletes the blob and keeps the exact message", async () => {
+    const t = makeT()
+    const userId = await seedUser(t)
+    const storageId = await seedStorageBlob(t, "just some plain text")
+
+    const result = await t.withIdentity({ subject: userId }).action(api.files.finalizeUpload, {
+      storageId, filename: "fake.png", contentType: "image/png", size: 19,
+    })
+    expect(result).toMatchObject({
+      ok: false,
+      code: "INVALID",
+      message: "Obsah súboru nezodpovedá jeho prípone.",
+    })
+    expect(await t.run(async (ctx) => ctx.storage.getMetadata(storageId))).toBeNull()
+  })
+
+  it("rejects an image above the 20 MiB OCR limit with the exact Slovak message", async () => {
+    const t = makeT()
+    const userId = await seedUser(t)
+    const oversized = imageBytes(PNG_SIGNATURE, 20 * 1024 * 1024 + 1)
+    const storageId = await seedImageBlob(t, oversized)
+
+    const result = await t.withIdentity({ subject: userId }).action(api.files.finalizeUpload, {
+      storageId,
+      filename: "big.png",
+      contentType: "image/png",
+      size: oversized.byteLength,
+    })
+    if (result.ok) throw new Error("an oversized image must be rejected")
+    expect(result.code).toBe("INVALID")
+    expect(result.message).toMatch(
+      /^Obrázok je príliš veľký pre rozpoznávanie textu\. Maximum je 20 MB \(tento má .+\)\.$/,
+    )
+    expect(await t.run(async (ctx) => ctx.storage.getMetadata(storageId))).toBeNull()
+  })
+
+  it("still applies whitespace-only rejection to text but not to images", async () => {
+    const t = makeT()
+    const userId = await seedUser(t)
+    // Obrázky prechádzajú aj bez extrahovateľného textu; štruktúra rozhoduje.
+    const storageId = await seedImageBlob(t, imageBytes(PNG_SIGNATURE, 1024))
+    const result = await t.withIdentity({ subject: userId }).action(api.files.finalizeUpload, {
+      storageId, filename: "blank.png", contentType: "image/png", size: 1024,
+    })
+    expect(result.ok).toBe(true)
+  })
+})

@@ -9,8 +9,35 @@ import {
   MapPin,
   AlertTriangle,
   Download,
+  ListChecks,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+export type FindingKind = "observation" | "hypothesis";
+
+export type FindingProvenance = {
+  document: string | null;
+  page: number | null;
+  section: string | null;
+  excerpt: string | null;
+  method: string | null;
+  verified: boolean;
+};
+
+export type AnalysisSource = {
+  document: string;
+  method: string;
+  pages: number | null;
+  sha256: string | null;
+  integrityNote: string;
+};
+
+export type AnalysisQuality = {
+  partial: boolean;
+  materiallyValid: boolean;
+  droppedItems: number;
+  warnings: string[];
+};
 
 export type SherlockAnalysis = {
   metadata?: {
@@ -25,6 +52,8 @@ export type SherlockAnalysis = {
     name: string;
     role?: string;
     description?: string;
+    provenance?: FindingProvenance;
+    kind?: FindingKind;
   }>;
   evidence?: Array<{
     id: string;
@@ -32,6 +61,8 @@ export type SherlockAnalysis = {
     content?: string;
     source?: string;
     relevance_score?: number;
+    provenance?: FindingProvenance;
+    kind?: FindingKind;
   }>;
   relationships?: Array<{
     person1_id?: string;
@@ -39,6 +70,8 @@ export type SherlockAnalysis = {
     type?: string;
     description?: string;
     evidence_supporting?: string[];
+    provenance?: FindingProvenance;
+    kind?: FindingKind;
   }>;
   timeline?: Array<{
     id: string;
@@ -52,8 +85,28 @@ export type SherlockAnalysis = {
     source_text?: string;
     confidence?: number;
     approximate?: boolean;
+    provenance?: FindingProvenance;
+    kind?: FindingKind;
   }>;
+  sources?: AnalysisSource[];
+  quality?: AnalysisQuality;
 };
+
+const INTEGRITY_NOTE =
+  "SHA-256 potvrdzuje nemennosť bajtov súboru, nie pravosť ani pôvod dokumentu.";
+
+const METHOD_LABELS: Record<string, string> = {
+  "pdf-text": "textová vrstva PDF",
+  "pdf-ocr": "OCR skenovaného PDF",
+  "image-ocr": "OCR obrázka",
+  docx: "DOCX",
+  plain: "textový súbor",
+};
+
+function methodLabel(method: string | null | undefined): string | null {
+  if (!method) return null;
+  return METHOD_LABELS[method] ?? method;
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -63,11 +116,38 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function objectArray(value: unknown): any[] {
+function objectArray(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter(isPlainObject) : [];
 }
 
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+    : [];
+}
+
 // Stabilné ID (P001/E001/T001) generuje map až pri čistení analýzy.
+
+// Provenancia sa prísne normalizuje: len objekt s očakávanými typmi, inak vynechaná.
+function normalizeProvenance(value: unknown): FindingProvenance | undefined {
+  if (!isPlainObject(value)) return undefined;
+  return {
+    document: nonEmptyString(value.document) ? value.document : null,
+    page:
+      typeof value.page === "number" && Number.isFinite(value.page)
+        ? value.page
+        : null,
+    section: nonEmptyString(value.section) ? value.section : null,
+    excerpt: nonEmptyString(value.excerpt) ? value.excerpt : null,
+    method: nonEmptyString(value.method) ? value.method : null,
+    verified: value.verified === true,
+  };
+}
+
+function normalizeKind(value: unknown): FindingKind | undefined {
+  if (value === "observation" || value === "hypothesis") return value;
+  return undefined;
+}
 
 // Čistí nesprávne tvarovanú analýzu (stray prvky, chýbajúce ID) pred renderingom a exportom.
 export function sanitizeAnalysis(analysis: SherlockAnalysis) {
@@ -84,31 +164,80 @@ export function sanitizeAnalysis(analysis: SherlockAnalysis) {
       };
       if (nonEmptyString(p.role)) entry.role = p.role.trim();
       if (nonEmptyString(p.description)) entry.description = p.description.trim();
+      const provenance = normalizeProvenance(p.provenance);
+      if (provenance) entry.provenance = provenance;
+      const kind = normalizeKind(p.kind);
+      if (kind) entry.kind = kind;
       return entry;
     });
 
   type EvidenceEntry = NonNullable<SherlockAnalysis["evidence"]>[number];
   const evidence: NonNullable<SherlockAnalysis["evidence"]> = objectArray(analysis.evidence).map(
-    (e, index): EvidenceEntry => ({
-      ...e,
-      id: nonEmptyString(e.id) ? e.id.trim() : `E${String(index + 1).padStart(3, "0")}`,
-    }),
+    (e, index): EvidenceEntry => {
+      const entry: EvidenceEntry = {
+        ...e,
+        id: nonEmptyString(e.id) ? e.id.trim() : `E${String(index + 1).padStart(3, "0")}`,
+      };
+      const provenance = normalizeProvenance(e.provenance);
+      if (provenance) entry.provenance = provenance;
+      const kind = normalizeKind(e.kind);
+      if (kind) entry.kind = kind;
+      return entry;
+    },
   );
 
   type RelationshipEntry = NonNullable<SherlockAnalysis["relationships"]>[number];
   const relationships: NonNullable<SherlockAnalysis["relationships"]> = objectArray(
     analysis.relationships,
-  ).map((r): RelationshipEntry => ({ ...r }));
+  ).map((r): RelationshipEntry => {
+    const entry: RelationshipEntry = { ...r };
+    const provenance = normalizeProvenance(r.provenance);
+    if (provenance) entry.provenance = provenance;
+    const kind = normalizeKind(r.kind);
+    if (kind) entry.kind = kind;
+    return entry;
+  });
 
   type TimelineEntry = NonNullable<SherlockAnalysis["timeline"]>[number];
   const timeline: NonNullable<SherlockAnalysis["timeline"]> = objectArray(analysis.timeline).map(
-    (t, index): TimelineEntry => ({
-      ...t,
-      id: nonEmptyString(t.id) ? t.id.trim() : `T${String(index + 1).padStart(3, "0")}`,
+    (t, index): TimelineEntry => {
+      const entry: TimelineEntry = {
+        ...t,
+        id: nonEmptyString(t.id) ? t.id.trim() : `T${String(index + 1).padStart(3, "0")}`,
+      };
+      const provenance = normalizeProvenance(t.provenance);
+      if (provenance) entry.provenance = provenance;
+      const kind = normalizeKind(t.kind);
+      if (kind) entry.kind = kind;
+      return entry;
+    },
+  );
+
+  type SourceEntry = NonNullable<SherlockAnalysis["sources"]>[number];
+  const sources: AnalysisSource[] = objectArray(analysis.sources).map(
+    (s): SourceEntry => ({
+      document: nonEmptyString(s.document) ? s.document : "",
+      method: nonEmptyString(s.method) ? s.method : "",
+      pages:
+        typeof s.pages === "number" && Number.isFinite(s.pages) ? s.pages : null,
+      sha256: nonEmptyString(s.sha256) ? s.sha256 : null,
+      integrityNote: nonEmptyString(s.integrityNote) ? s.integrityNote : INTEGRITY_NOTE,
     }),
   );
 
-  return { metadata, persons, evidence, relationships, timeline };
+  const quality: AnalysisQuality = {
+    partial: analysis.quality?.partial === true,
+    materiallyValid: analysis.quality?.materiallyValid !== false,
+    droppedItems:
+      typeof analysis.quality?.droppedItems === "number" &&
+      Number.isFinite(analysis.quality.droppedItems) &&
+      analysis.quality.droppedItems >= 0
+        ? analysis.quality.droppedItems
+        : 0,
+    warnings: stringArray(analysis.quality?.warnings),
+  };
+
+  return { metadata, persons, evidence, relationships, timeline, sources, quality };
 }
 
 export function buildAnalysisExport(
@@ -123,7 +252,7 @@ export function buildAnalysisExport(
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "analyza";
-  // Export obsahuje len vyčistené a validné záznamy.
+  // Export obsahuje len vyčistené a validné záznamy (vrátane provenancie a kvality).
   const safe = sanitizeAnalysis(analysis);
   const payload = {
     exportedAt: exportDate.toISOString(),
@@ -133,6 +262,8 @@ export function buildAnalysisExport(
     evidence: safe.evidence,
     relationships: safe.relationships,
     timeline: safe.timeline,
+    sources: safe.sources,
+    quality: safe.quality,
   };
 
   return {
@@ -154,6 +285,51 @@ function formatTimestamp(ts?: string | null): string {
   });
 }
 
+// Malý riadok s dokladom pôvodu zistenia (dokument, metóda, strana a výsledok overenia).
+function ProvenanceLine({
+  provenance,
+  kind,
+  showExcerpt,
+}: {
+  provenance?: FindingProvenance;
+  kind?: FindingKind;
+  showExcerpt?: boolean;
+}) {
+  if (!provenance && !kind) return null;
+  const label = methodLabel(provenance?.method);
+  return (
+    <div
+      className="mt-2 space-y-1 text-xs text-muted-foreground"
+      data-testid="finding-provenance"
+    >
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span>{provenance?.document ?? "neznámy dokument"}</span>
+        {label && <span>• {label}</span>}
+        <span>
+          • {provenance?.page != null ? `str. ${provenance.page}` : "strana neznáma"}
+        </span>
+        <span
+          className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary"
+          data-testid="finding-kind"
+        >
+          {kind === "observation" ? "Pozorovanie" : "Hypotéza AI"}
+        </span>
+        {provenance?.verified === false && (
+          <span
+            className="rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive"
+            data-testid="finding-unverified"
+          >
+            Neoverená citácia
+          </span>
+        )}
+      </div>
+      {showExcerpt && provenance?.excerpt && (
+        <p className="line-clamp-2 italic">{provenance.excerpt}</p>
+      )}
+    </div>
+  );
+}
+
 export function SherlockResults({
   analysis,
 }: {
@@ -162,7 +338,7 @@ export function SherlockResults({
   const [searchTerm, setSearchTerm] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const { metadata, persons, evidence, relationships, timeline } = useMemo(
+  const { metadata, persons, evidence, relationships, timeline, sources, quality } = useMemo(
     () => sanitizeAnalysis(analysis),
     [analysis],
   );
@@ -210,6 +386,9 @@ export function SherlockResults({
     [evidence],
   );
   const canExport = timeline.length > 0 || persons.length > 0 || evidence.length > 0 || relationships.length > 0;
+  const showPartial =
+    quality.partial === true || quality.warnings.length > 0;
+  const extraWarnings = Math.max(quality.warnings.length - 5, 0);
   const handleExport = () => {
     if (!canExport) return;
     const { filename, json } = buildAnalysisExport(analysis, metadata?.document_name);
@@ -221,7 +400,7 @@ export function SherlockResults({
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    URL.revokeObjectURL(url);
   };
 
   if (!canExport) {
@@ -264,6 +443,34 @@ export function SherlockResults({
           Exportovať JSON
         </button>
       </div>
+
+      {/* Upozornenie na čiastočný výsledok */}
+      {showPartial && (
+        <div
+          className="rounded-xl border border-border bg-card p-4 text-sm shadow-sm"
+          data-testid="sherlock-partial"
+          role="status"
+        >
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 size-5 shrink-0 text-primary" />
+            <div className="min-w-0">
+              <p className="font-medium">Výsledok je čiastočný.</p>
+              <p className="text-xs text-muted-foreground">
+                Časť vstupných údajov bola neplatná a bola vynechaná.
+              </p>
+              {quality.warnings.length > 0 && (
+                <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
+                  {quality.warnings.slice(0, 5).map((warning, index) => (
+                    <li key={index}>{warning}</li>
+                  ))}
+                  {extraWarnings > 0 && <li>+{extraWarnings} ďalších</li>}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Metadata */}
       {isPlainObject(analysis.metadata) && (
         <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
@@ -298,6 +505,39 @@ export function SherlockResults({
             )}
           </div>
         </div>
+      )}
+
+      {/* Zdroje a integrita */}
+      {sources.length > 0 && (
+        <section data-testid="sherlock-sources">
+          <div className="mb-3 flex items-center gap-2">
+            <ListChecks className="size-5 text-primary" />
+            <h2 className="text-lg font-bold">Zdroje a integrita súborov</h2>
+          </div>
+          <ul className="space-y-2">
+            {sources.map((source, index) => {
+              const label = methodLabel(source.method);
+              return (
+                <li
+                  key={`${source.document}-${index}`}
+                  className="rounded-xl border border-border bg-card p-3 text-sm shadow-sm"
+                >
+                  <p className="font-medium">{source.document}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {label ? `${label} • ` : ""}
+                    {source.pages != null ? `${source.pages} stránok` : "počet strán neznámy"}
+                    {source.sha256 ? ` • SHA-256: ${source.sha256.slice(0, 12)}…` : ""}
+                  </p>
+                  {source.integrityNote && (
+                    <p className="mt-1 text-xs italic text-muted-foreground">
+                      {source.integrityNote}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
 
       {/* Timeline */}
@@ -396,6 +636,8 @@ export function SherlockResults({
                           )}
                         </div>
 
+                        <ProvenanceLine provenance={event.provenance} kind={event.kind} />
+
                         {isOpen && (
                           <div className="mt-3 space-y-3 border-t border-border pt-3 text-sm">
                             {event.description && (
@@ -475,6 +717,11 @@ export function SherlockResults({
                     {person.description}
                   </p>
                 )}
+                <ProvenanceLine
+                  provenance={person.provenance}
+                  kind={person.kind}
+                  showExcerpt
+                />
               </div>
             ))}
           </div>
@@ -513,6 +760,7 @@ export function SherlockResults({
                     )}
                     {e.source && <span>{e.source}</span>}
                   </div>
+                  <ProvenanceLine provenance={e.provenance} kind={e.kind} showExcerpt />
                 </div>
               </li>
             ))}
@@ -558,6 +806,11 @@ export function SherlockResults({
                         .join(", ")}
                     </p>
                   )}
+                  <ProvenanceLine
+                    provenance={rel.provenance}
+                    kind={rel.kind}
+                    showExcerpt
+                  />
                 </div>
               );
             })}

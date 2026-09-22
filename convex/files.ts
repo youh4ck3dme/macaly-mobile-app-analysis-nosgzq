@@ -16,10 +16,15 @@ type SaveResult =
 // Server-side file upload constraints. Mirrored from the client so the limits
 // cannot be bypassed by calling the Convex mutation directly.
 const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200 MB
+// OCR-obrázkový limit (PNG/JPG nad tento limit nie je možné spoľahlivo rozpoznať).
+const IMAGE_OCR_MAX_BYTES = 20 * 1024 * 1024; // 20 MB
 // Povolené prípony mapované na normalizovaný formát uložený v databáze.
 const ALLOWED_EXTENSIONS: Record<string, string> = {
   ".pdf": "pdf",
   ".docx": "docx",
+  ".png": "png",
+  ".jpg": "jpg",
+  ".jpeg": "jpg",
   ".txt": "txt",
   ".md": "md",
   ".csv": "csv",
@@ -81,7 +86,7 @@ async function validateAndInsertFile(
   const filename = args.filename.trim();
   if (!filename) return { ok: false, code: "INVALID", message: "Názov súboru je povinný." };
   const format = getFormatFromFilename(filename);
-  if (!format) return { ok: false, code: "INVALID", message: "Nepodporovaný typ súboru. Povolené sú iba súbory PDF, DOCX, TXT, MD, CSV a JSON." };
+  if (!format) return { ok: false, code: "INVALID", message: "Nepodporovaný typ súboru. Povolené sú iba súbory PDF, DOCX, PNG, JPG, TXT, MD, CSV a JSON." };
   const metadata = await ctx.storage.getMetadata(args.storageId);
   if (!metadata) return { ok: false, code: "INVALID", message: "Nahraný súbor sa nepodarilo overiť. Skúste ho nahrať znova." };
   const actualSize = metadata.size;
@@ -125,18 +130,27 @@ export const finalizeUpload = action({
     const filename = args.filename.trim();
     if (!filename) return { ok: false, code: "INVALID", message: "Názov súboru je povinný." };
     const format = getFormatFromFilename(filename);
-    if (!format) return { ok: false, code: "INVALID", message: "Nepodporovaný typ súboru. Povolené sú iba súbory PDF, DOCX, TXT, MD, CSV a JSON." };
+    if (!format) return { ok: false, code: "INVALID", message: "Nepodporovaný typ súboru. Povolené sú iba súbory PDF, DOCX, PNG, JPG, TXT, MD, CSV a JSON." };
     const blob = await ctx.storage.get(args.storageId);
     if (!blob) return { ok: false, code: "INVALID", message: "Nahraný súbor sa nepodarilo overiť. Skúste ho nahrať znova." };
     const firstBytes = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
     const startsWith = (signature: number[]) => signature.every((byte, index) => firstBytes[index] === byte);
     const pdfSignature = [0x25, 0x50, 0x44, 0x46, 0x2d];
     const zipSignature = [0x50, 0x4b, 0x03, 0x04];
-    const binarySignatures = [pdfSignature, zipSignature, [0x7f, 0x45, 0x4c, 0x46], [0x89, 0x50, 0x4e, 0x47], [0xff, 0xd8, 0xff], [0x47, 0x49, 0x46, 0x38], [0x1f, 0x8b]];
-    const isContentValid = format === "pdf" ? startsWith(pdfSignature) : format === "docx" ? startsWith(zipSignature) : !binarySignatures.some(startsWith);
+    const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    const jpgSignature = [0xff, 0xd8, 0xff];
+    // Binárne podpisy odmietané v textových formátoch (PNG/JPEG ostávajú v tomto zozname).
+    const binarySignatures = [pdfSignature, zipSignature, pngSignature, jpgSignature, [0x7f, 0x45, 0x4c, 0x46], [0x47, 0x49, 0x46, 0x38], [0x1f, 0x8b]];
+    const isImage = format === "png" || format === "jpg";
+    const isContentValid = format === "pdf" ? startsWith(pdfSignature) : format === "docx" ? startsWith(zipSignature) : isImage ? (format === "png" ? startsWith(pngSignature) : startsWith(jpgSignature)) : !binarySignatures.some(startsWith);
     if (!isContentValid) {
       await ctx.storage.delete(args.storageId);
       return { ok: false, code: "INVALID", message: "Obsah súboru nezodpovedá jeho prípone." };
+    }
+    // OCR-obrázky nad 20 MB neprejdú rozpoznávaním textu; odmietnuť ich rovno pri zbere.
+    if (isImage && blob.size > IMAGE_OCR_MAX_BYTES) {
+      await ctx.storage.delete(args.storageId);
+      return { ok: false, code: "INVALID", message: `Obrázok je príliš veľký pre rozpoznávanie textu. Maximum je 20 MB (tento má ${formatBytes(blob.size)}).` };
     }
     if (["txt", "md", "csv", "json"].includes(format) && blob.size <= 1_000_000 && !(await blob.text()).trim()) {
       await ctx.storage.delete(args.storageId);

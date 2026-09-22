@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { query, mutation, internalMutation } from "./_generated/server";
+import { query, mutation, internalMutation, internalQuery } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import type { Doc } from "./_generated/dataModel";
 
@@ -77,7 +77,11 @@ export const remove = mutation({
         message: "K tejto analýze nemáte prístup.",
       };
     }
-    if (existing.status === "analyzing") {
+    if (
+      existing.status === "analyzing" ||
+      existing.status === "queued" ||
+      existing.status === "processing"
+    ) {
       return {
         ok: false,
         code: "INVALID",
@@ -96,8 +100,17 @@ export const insertAnalysis = internalMutation({
     fileIds: v.array(v.id("files")),
     name: v.string(),
     data: v.any(),
-    status: v.union(v.literal("analyzing"), v.literal("ready"), v.literal("error")),
+    status: v.union(
+      v.literal("analyzing"),
+      v.literal("ready"),
+      v.literal("error"),
+      v.literal("queued"),
+      v.literal("processing"),
+      v.literal("succeeded"),
+      v.literal("failed"),
+    ),
     errorMessage: v.optional(v.string()),
+    attempts: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -108,6 +121,7 @@ export const insertAnalysis = internalMutation({
       data: args.data,
       status: args.status,
       errorMessage: args.errorMessage,
+      attempts: args.attempts,
       progress: 0,
       progressLabel: "Pripravuje sa analýza",
       createdAt: now,
@@ -123,11 +137,16 @@ export const updateAnalysisProgress = internalMutation({
     analysisId: v.id("analyses"),
     progress: v.number(),
     progressLabel: v.string(),
+    expectedAttempt: v.optional(v.number()),
   },
   returns: v.null(),
   handler: async (ctx, args): Promise<null> => {
     const existing = await ctx.db.get(args.analysisId);
     if (!existing) return null;
+    // Stale-run ochrana: starší beh nesmie prepísať výsledok novšieho.
+    if (args.expectedAttempt !== undefined && (existing.attempts ?? 0) !== args.expectedAttempt) {
+      return null;
+    }
     await ctx.db.patch(args.analysisId, {
       progress: Math.max(0, Math.min(100, Math.round(args.progress))),
       progressLabel: args.progressLabel,
@@ -144,11 +163,25 @@ export const updateAnalysis = internalMutation({
     // a neprepísala existujúce dáta alebo chybové hlásenie zbytočne.
     data: v.optional(v.any()),
     status: v.optional(
-      v.union(v.literal("analyzing"), v.literal("ready"), v.literal("error")),
+      v.union(
+        v.literal("analyzing"),
+        v.literal("ready"),
+        v.literal("error"),
+        v.literal("queued"),
+        v.literal("processing"),
+        v.literal("succeeded"),
+        v.literal("failed"),
+      ),
     ),
     errorMessage: v.optional(v.string()),
     progress: v.optional(v.number()),
     progressLabel: v.optional(v.string()),
+    expectedAttempt: v.optional(v.number()),
+    attempts: v.optional(v.number()),
+    startedAt: v.optional(v.number()),
+    finishedAt: v.optional(v.number()),
+    partial: v.optional(v.boolean()),
+    warnings: v.optional(v.array(v.string())),
   },
   returns: v.null(),
   handler: async (ctx, args): Promise<null> => {
@@ -160,9 +193,42 @@ export const updateAnalysis = internalMutation({
       patch.progress = Math.max(0, Math.min(100, Math.round(args.progress)));
     }
     if (args.progressLabel !== undefined) patch.progressLabel = args.progressLabel;
+    if (args.attempts !== undefined) patch.attempts = args.attempts;
+    if (args.startedAt !== undefined) patch.startedAt = args.startedAt;
+    if (args.finishedAt !== undefined) patch.finishedAt = args.finishedAt;
+    if (args.partial !== undefined) patch.partial = args.partial;
+    if (args.warnings !== undefined) patch.warnings = args.warnings;
     const existing = await ctx.db.get(args.analysisId);
     if (!existing) return null;
+    // Stale-run ochrana: starší beh nesmie prepísať výsledok novšieho.
+    if (args.expectedAttempt !== undefined && (existing.attempts ?? 0) !== args.expectedAttempt) {
+      return null;
+    }
     await ctx.db.patch(args.analysisId, patch);
     return null;
+  },
+});
+
+// Interná čítačka pre runAnalysis: stav behu + pokus + vlastník + súbory.
+export const getForRun = internalQuery({
+  args: { analysisId: v.id("analyses") },
+  returns: v.union(
+    v.null(),
+    v.object({
+      ownerId: v.id("users"),
+      status: v.string(),
+      attempts: v.optional(v.number()),
+      fileIds: v.array(v.id("files")),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.analysisId);
+    if (!row) return null;
+    return {
+      ownerId: row.ownerId,
+      status: row.status,
+      attempts: row.attempts,
+      fileIds: row.fileIds,
+    };
   },
 });
