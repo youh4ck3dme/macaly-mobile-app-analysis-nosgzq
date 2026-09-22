@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { action, internalAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { analyzeWithMistral, ocrWithMistral, TransientMistralError } from "./mistral";
-import { normalizeAnalysisData } from "./analysisNormalize";
+import { normalizeAnalysisData, safeAnalysisErrorMessage } from "./analysisNormalize";
 import { isTextLayerUsable, locateExcerpt, normalizeForMatch, type ExtractedSource } from "./extraction";
 
 // Forenzný systémový prompt podľa špecifikácie Sherlock AI Analyzer.
@@ -643,7 +643,7 @@ ${consolidated}
       });
       return;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Analýza zlyhala.";
+      const message = safeAnalysisErrorMessage(error);
       const isTransient = error instanceof TransientMistralError;
       if (isTransient && args.attempt < MAX_ATTEMPTS) {
         // Obmedzený retry: späť do frontu, znova naplánovať s vyšším pokusom.

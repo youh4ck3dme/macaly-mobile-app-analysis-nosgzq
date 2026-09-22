@@ -72,6 +72,36 @@ describe("resolveOtpDelivery", () => {
     });
   });
 
+  it("never prints codes for decisive-terrier-395 when OTP_ENDPOINT is missing", () => {
+    const prod: OtpEnv = {
+      CONVEX_CLOUD_URL: "https://decisive-terrier-395.eu-west-1.convex.cloud",
+      CONVEX_SITE_URL: "https://decisive-terrier-395.eu-west-1.convex.site",
+    };
+    expect(resolveOtpDelivery(prod).mode).toBe("refuse");
+    expect(
+      resolveOtpDelivery({
+        ...prod,
+        AUTH_DEV_OTP: "1",
+        CONVEX_DEPLOYMENT: "dev:decisive-terrier-395",
+      }).mode,
+    ).toBe("refuse");
+    expect(
+      resolveOtpDelivery({
+        ...prod,
+        AUTH_DEV_OTP: "1",
+        CONVEX_DEPLOYMENT: "anonymous:anonymous-agent",
+      }).mode,
+    ).toBe("refuse");
+    expect(
+      resolveOtpDelivery({
+        ...prod,
+        CONVEX_DEPLOYMENT: "prod:decisive-terrier-395",
+        OTP_ENDPOINT: "https://otp.example/send",
+        AUTH_DEV_OTP: "1",
+      }),
+    ).toEqual({ mode: "remote", endpoint: "https://otp.example/send" });
+  });
+
   it("never prints codes for a prod deployment, even when the dev flag is set", () => {
     expect(
       resolveOtpDelivery({
@@ -163,6 +193,29 @@ describe("deliverOtp", () => {
     });
   });
 
+  it("does not call the endpoint or log the code when CHAT_ID or SECRET_KEY is missing", async () => {
+    const fetchFn = vi.fn();
+    const log = vi.fn();
+
+    await expect(
+      deliverOtp(
+        { email: "user@example.com", token: "654321" },
+        {
+          env: {
+            ...HOSTED,
+            OTP_ENDPOINT: "https://otp.example/send",
+            CHAT_ID: "chat-1",
+          },
+          fetchFn,
+          log,
+        },
+      ),
+    ).rejects.toThrow(/SECRET_KEY/);
+
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
+  });
+
   it("surfaces the provider error without treating the send as successful", async () => {
     const fetchFn = vi.fn(
       async () =>
@@ -176,7 +229,12 @@ describe("deliverOtp", () => {
       deliverOtp(
         { email: "user@example.com", token: "000111" },
         {
-          env: { ...HOSTED, OTP_ENDPOINT: "https://otp.example/send" },
+          env: {
+            ...HOSTED,
+            OTP_ENDPOINT: "https://otp.example/send",
+            CHAT_ID: "chat-1",
+            SECRET_KEY: "secret",
+          },
           fetchFn,
         },
       ),
