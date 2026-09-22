@@ -1,6 +1,7 @@
 import { HeadContent, Outlet, Scripts, createRootRoute } from '@tanstack/react-router'
 import { MacalyBridge } from '@macaly/bridge'
 import AppConvexProvider from '../components/convex-client-provider'
+import { SwipeNavigationProvider } from '../components/swipe-navigation-provider'
 
 // CSS imported as a side effect — do NOT add `?url` or `?inline`.
 //
@@ -45,9 +46,11 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   return (
-    <AppConvexProvider>
-      <Outlet />
-    </AppConvexProvider>
+    <SwipeNavigationProvider>
+      <AppConvexProvider>
+        <Outlet />
+      </AppConvexProvider>
+    </SwipeNavigationProvider>
   )
 }
 
