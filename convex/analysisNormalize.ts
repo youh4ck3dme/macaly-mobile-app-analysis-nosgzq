@@ -185,7 +185,7 @@ const SECTION_STRING_KEYS: Record<SectionName, string[]> = {
   persons: ["id", "role", "description", "source_document", "document", "section", "source_section"],
   evidence: ["id", "type", "content", "source", "source_document", "document", "section", "source_section"],
   relationships: ["person1_id", "person2_id", "type", "description", "source_document", "document", "section", "source_section"],
-  timeline: ["id", "title", "description", "location", "source_text", "source_document", "document", "section", "source_section", "timestamp"],
+  timeline: ["id", "title", "description", "location", "source_text", "source_document", "document", "section", "source_section"],
 };
 
 /** Vráti trimnutú hodnotu, keď existuje ako neprázdny reťazec. */
@@ -237,6 +237,20 @@ function countInvalidFields(entry: Record<string, unknown>, section: SectionName
     if ("approximate" in entry && typeof entry.approximate !== "boolean") invalid++;
   }
   return invalid;
+}
+
+function sectionObjects(
+  value: unknown,
+): { entries: Record<string, unknown>[]; dropped: number; total: number } {
+  if (!Array.isArray(value)) {
+    return { entries: [], dropped: 0, total: 0 };
+  }
+  const entries = objectArray(value);
+  return {
+    entries,
+    dropped: value.length - entries.length,
+    total: value.length,
+  };
 }
 
 function resolveSources(
@@ -421,9 +435,14 @@ export function normalizeAnalysisData(
   }
 
   const persons: NormalizedAnalysis["persons"] = [];
-  const rawPersons = objectArray(source.persons);
-  sectionTotal.persons = rawPersons.length;
-  rawPersons.forEach((person, index) => {
+  const rawPersons = sectionObjects(source.persons);
+  sectionTotal.persons = rawPersons.total;
+  if (rawPersons.dropped > 0) {
+    sectionDrops.persons += rawPersons.dropped;
+    sectionEntryDrops.persons += rawPersons.dropped;
+    sectionWarnings.add("persons");
+  }
+  rawPersons.entries.forEach((person, index) => {
     if (!nonEmptyString(person.name)) {
       noteEntryDrop("persons");
       return;
@@ -444,9 +463,14 @@ export function normalizeAnalysisData(
   });
 
   const evidence: NormalizedAnalysis["evidence"] = [];
-  const rawEvidence = objectArray(source.evidence);
-  sectionTotal.evidence = rawEvidence.length;
-  rawEvidence.forEach((item, index) => {
+  const rawEvidence = sectionObjects(source.evidence);
+  sectionTotal.evidence = rawEvidence.total;
+  if (rawEvidence.dropped > 0) {
+    sectionDrops.evidence += rawEvidence.dropped;
+    sectionEntryDrops.evidence += rawEvidence.dropped;
+    sectionWarnings.add("evidence");
+  }
+  rawEvidence.entries.forEach((item, index) => {
     // Prvok bez obsahu, zdroja aj typu nemá čo zobraziť.
     if (
       !nonEmptyString(item.content) &&
@@ -475,9 +499,14 @@ export function normalizeAnalysisData(
   });
 
   const relationships: NormalizedAnalysis["relationships"] = [];
-  const rawRelationships = objectArray(source.relationships);
-  sectionTotal.relationships = rawRelationships.length;
-  rawRelationships.forEach((rel, index) => {
+  const rawRelationships = sectionObjects(source.relationships);
+  sectionTotal.relationships = rawRelationships.total;
+  if (rawRelationships.dropped > 0) {
+    sectionDrops.relationships += rawRelationships.dropped;
+    sectionEntryDrops.relationships += rawRelationships.dropped;
+    sectionWarnings.add("relationships");
+  }
+  rawRelationships.entries.forEach((rel, index) => {
     const p1 = fieldString(rel, "person1_id");
     const p2 = fieldString(rel, "person2_id");
     if (!p1 && !p2) {
@@ -502,9 +531,14 @@ export function normalizeAnalysisData(
   });
 
   const timeline: NormalizedAnalysis["timeline"] = [];
-  const rawTimeline = objectArray(source.timeline);
-  sectionTotal.timeline = rawTimeline.length;
-  rawTimeline.forEach((event, index) => {
+  const rawTimeline = sectionObjects(source.timeline);
+  sectionTotal.timeline = rawTimeline.total;
+  if (rawTimeline.dropped > 0) {
+    sectionDrops.timeline += rawTimeline.dropped;
+    sectionEntryDrops.timeline += rawTimeline.dropped;
+    sectionWarnings.add("timeline");
+  }
+  rawTimeline.entries.forEach((event, index) => {
     // Udalosť bez názvu, popisu aj zdrojového textu je nepoužiteľná.
     if (
       !nonEmptyString(event.title) &&

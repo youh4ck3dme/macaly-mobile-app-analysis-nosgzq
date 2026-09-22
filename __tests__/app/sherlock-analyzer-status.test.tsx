@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { SherlockAnalyzer } from "@/components/sherlock-analyzer";
-import { api } from "../../convex/_generated/api";
 
 const state = vi.hoisted(() => ({
   analyses: [] as Array<Record<string, unknown>>,
@@ -9,11 +8,13 @@ const state = vi.hoisted(() => ({
 
 vi.mock("convex/react", async () => {
   const actual: typeof import("convex/react") = await vi.importActual("convex/react");
+  const functionName = Symbol.for("functionName");
   const useQueryMock = (fn: unknown) => {
-    if (fn === api.analyses.listMyAnalyses) {
+    const name = (fn as Record<symbol, string> | null)?.[functionName];
+    if (name === "analyses:listMyAnalyses") {
       return { ok: true, analyses: state.analyses };
     }
-    if (fn === api.files.listMyFiles) {
+    if (name === "files:listMyFiles") {
       return { ok: true, files: [] };
     }
     return undefined;
