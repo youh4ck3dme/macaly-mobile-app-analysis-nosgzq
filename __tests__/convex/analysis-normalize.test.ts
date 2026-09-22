@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   normalizeAnalysisData,
+  safeAnalysisErrorMessage,
   type NormalizeContext,
 } from "../../convex/analysisNormalize";
 
@@ -339,5 +340,22 @@ describe("normalizeAnalysisData", () => {
     expect(result.persons[0].provenance.excerpt).toBe(description);
     expect(result.persons[0].provenance.verified).toBe(true);
     expect(result.persons[0].kind).toBe("observation");
+  });
+});
+
+describe("safeAnalysisErrorMessage", () => {
+  it("keeps the missing-key message and drops stacks and secrets", () => {
+    expect(safeAnalysisErrorMessage(new Error("Mistral AI kľúč nie je nakonfigurovaný."))).toBe(
+      "Mistral AI kľúč nie je nakonfigurovaný.",
+    );
+    expect(
+      safeAnalysisErrorMessage(new Error("Analýza zlyhala.\n    at runAnalysis (analyze.ts:1:1)")),
+    ).toBe("Analýza zlyhala.");
+    expect(safeAnalysisErrorMessage(new Error("request failed Bearer sk-live-secretvalue"))).toBe(
+      "Analýza zlyhala.",
+    );
+    expect(safeAnalysisErrorMessage(new Error("MISTRAL_API_KEY=sk-live-secretvalue"))).toBe(
+      "Analýza zlyhala.",
+    );
   });
 });

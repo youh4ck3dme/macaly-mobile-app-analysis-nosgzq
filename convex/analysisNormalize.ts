@@ -607,3 +607,22 @@ export function normalizeAnalysisData(
     quality: { partial, materiallyValid, droppedItems, warnings },
   };
 }
+
+const ANALYSIS_ERROR_FALLBACK = "Analýza zlyhala.";
+
+/**
+ * Text uložený do `errorMessage` a zobrazený vo fronte.
+ * Jedna veta, bez stacku a bez hodnôt kľúčov.
+ */
+export function safeAnalysisErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "";
+  const line = raw.split(/\r?\n/, 1)[0]?.trim() ?? "";
+  if (!line || line.length > 500) return ANALYSIS_ERROR_FALLBACK;
+  if (/bearer\s+\S+/i.test(line)) return ANALYSIS_ERROR_FALLBACK;
+  if (/\bsk-[A-Za-z0-9_-]{8,}/.test(line)) return ANALYSIS_ERROR_FALLBACK;
+  if (/MISTRAL_(API_)?KEY|SECRET_KEY|OTP_ENDPOINT|CONVEX_DEPLOY_KEY/i.test(line)) {
+    return ANALYSIS_ERROR_FALLBACK;
+  }
+  if (/\bat\s+.+\(.+:\d+:\d+\)/.test(line)) return ANALYSIS_ERROR_FALLBACK;
+  return line;
+}

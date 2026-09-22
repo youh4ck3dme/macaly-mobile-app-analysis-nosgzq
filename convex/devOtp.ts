@@ -27,11 +27,16 @@ export type OtpDelivery =
 const REFUSE_REASON =
   "OTP_ENDPOINT is not configured. Refusing to print verification codes outside a local/dev deployment.";
 
+const PROD_DEPLOYMENT_SLUG = "decisive-terrier-395";
+
 export function resolveOtpDelivery(env: OtpEnv): OtpDelivery {
   const endpoint = env.OTP_ENDPOINT?.trim() ?? "";
   const kind = deploymentKind(env.CONVEX_DEPLOYMENT);
 
-  if (isProductionKind(kind)) {
+  // Hosted prod, including decisive-terrier-395, never prints a code just
+  // because OTP_ENDPOINT is missing — even if AUTH_DEV_OTP or a dev/local
+  // deployment label is also set.
+  if (isProductionKind(kind) || isNamedProduction(env)) {
     if (!endpoint) return { mode: "refuse", reason: REFUSE_REASON };
     return { mode: "remote", endpoint };
   }
@@ -87,6 +92,11 @@ export async function deliverOtp(
     throw new Error(decision.reason);
   }
 
+  const missing = (["CHAT_ID", "SECRET_KEY"] as const).filter((name) => !env[name]?.trim());
+  if (missing.length > 0) {
+    throw new Error(`OTP delivery is not configured. Missing ${missing.join(", ")}.`);
+  }
+
   const fetchFn = options?.fetchFn ?? fetch;
   const response = await fetchFn(decision.endpoint, {
     method: "POST",
@@ -104,12 +114,16 @@ export async function deliverOtp(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    const message =
+    const upstream =
       errorData &&
       typeof errorData === "object" &&
       "error" in errorData &&
       typeof errorData.error === "string"
         ? errorData.error
+        : "";
+    const message =
+      upstream && !upstream.includes(params.token)
+        ? upstream
         : "Failed to send verification email";
     throw new Error(message);
   }
@@ -121,6 +135,17 @@ function deploymentKind(deployment: string | undefined): string {
 
 function isProductionKind(kind: string): boolean {
   return kind === "prod" || kind === "production" || kind === "preview";
+}
+
+function isNamedProduction(env: OtpEnv): boolean {
+  const deployment = (env.CONVEX_DEPLOYMENT ?? "").toLowerCase();
+  if (deployment.includes(PROD_DEPLOYMENT_SLUG)) return true;
+  const hosts = [hostname(env.CONVEX_CLOUD_URL), hostname(env.CONVEX_SITE_URL)];
+  return hosts.some(
+    (host) =>
+      host === `${PROD_DEPLOYMENT_SLUG}.eu-west-1.convex.cloud` ||
+      host === `${PROD_DEPLOYMENT_SLUG}.eu-west-1.convex.site`,
+  );
 }
 
 function isLoopback(rawUrl: string | undefined): boolean {

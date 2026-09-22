@@ -23,10 +23,12 @@
 .local
 .lesshst
 
-# env and secrets — keep .env.example, never commit .env.local
+# env and secrets — keep .env.example and the public production URLs.
+# Never commit .env.local, deploy keys, or OTP/Mistral secrets.
 .env
 .env.*
 !.env.example
+!.env.production
 
 # archives
 *.zip
