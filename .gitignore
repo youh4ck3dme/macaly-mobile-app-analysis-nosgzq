@@ -23,7 +23,7 @@
 .local
 .lesshst
 
-# local env (keep .env.example)
+# env and secrets — keep .env.example, never commit .env.local
 .env
 .env.*
 !.env.example
