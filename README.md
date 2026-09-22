@@ -21,4 +21,4 @@ Lokálny backend (`npx convex dev`, deployment `anonymous:` / `local:`, alebo lo
 
 4. `npm run dev` a otvor http://localhost:3000.
 
-`.env.local` necommituj. Bez `VITE_CONVEX_URL` dev server nespadne na 500 — zobrazí sa obrazovka „Chýba CONVEX_URL — spusti convex dev“.
+`.env.local` necommituj. Bez `VITE_CONVEX_URL` dev server nespadne na 500 — zobrazí sa obrazovka „Chýba VITE_CONVEX_URL — spusti convex dev“.
