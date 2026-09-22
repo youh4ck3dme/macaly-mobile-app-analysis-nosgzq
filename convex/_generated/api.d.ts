@@ -15,6 +15,7 @@ import type * as analyze from "../analyze.js";
 import type * as analyzeEnqueue from "../analyzeEnqueue.js";
 import type * as auth from "../auth.js";
 import type * as cases from "../cases.js";
+import type * as devOtp from "../devOtp.js";
 import type * as extraction from "../extraction.js";
 import type * as files from "../files.js";
 import type * as http from "../http.js";
@@ -38,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   analyzeEnqueue: typeof analyzeEnqueue;
   auth: typeof auth;
   cases: typeof cases;
+  devOtp: typeof devOtp;
   extraction: typeof extraction;
   files: typeof files;
   http: typeof http;
