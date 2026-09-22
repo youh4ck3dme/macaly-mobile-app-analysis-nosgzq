@@ -152,6 +152,9 @@ export function createHistoryIndexTracker() {
     getMaxIndex() {
       return maxIndex
     },
+    reset() {
+      maxIndex = 0
+    },
   }
 }
 

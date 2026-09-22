@@ -38,6 +38,17 @@ type GestureState = {
 }
 
 /**
+ * Module-level tracker survives provider remounts between routes so forward
+ * history stays available after an edge-swipe back.
+ */
+const historyIndexTracker = createHistoryIndexTracker()
+
+/** Test-only: clear forward-stack ceiling between cases. */
+export function resetSwipeNavigationTrackerForTests() {
+  historyIndexTracker.reset()
+}
+
+/**
  * Edge-swipe history navigation for touch / optional pointer.
  * Attaches window listeners; call from a single root provider.
  */
@@ -45,13 +56,12 @@ export function useSwipeNavigation(): SwipeNavigationVisualState {
   const router = useRouter()
   const [visual, setVisual] = useState<SwipeNavigationVisualState>(INITIAL_VISUAL)
   const gestureRef = useRef<GestureState | null>(null)
-  const trackerRef = useRef(createHistoryIndexTracker())
   const releasingTimerRef = useRef<number | null>(null)
 
   const syncTracker = useCallback(
     (actionType?: string) => {
       const idx = readHistoryIndex(router.history.location.state)
-      trackerRef.current.sync(idx, actionType)
+      historyIndexTracker.sync(idx, actionType)
     },
     [router],
   )
@@ -74,7 +84,7 @@ export function useSwipeNavigation(): SwipeNavigationVisualState {
   const navigateIfPossible = useCallback(
     (direction: SwipeNavDirection) => {
       const canGoBack = router.history.canGoBack()
-      const canGoForward = trackerRef.current.canGoForward(
+      const canGoForward = historyIndexTracker.canGoForward(
         readHistoryIndex(router.history.location.state),
       )
       if (!canNavigate(direction, { canGoBack, canGoForward })) return false
@@ -108,7 +118,7 @@ export function useSwipeNavigation(): SwipeNavigationVisualState {
       })
 
       const canGoBack = router.history.canGoBack()
-      const canGoForward = trackerRef.current.canGoForward(
+      const canGoForward = historyIndexTracker.canGoForward(
         readHistoryIndex(router.history.location.state),
       )
       const shouldNav = canNavigate(intent, { canGoBack, canGoForward })
@@ -173,7 +183,7 @@ export function useSwipeNavigation(): SwipeNavigationVisualState {
 
       // Only start back/forward if history allows that direction.
       const canGoBack = router.history.canGoBack()
-      const canGoForward = trackerRef.current.canGoForward(
+      const canGoForward = historyIndexTracker.canGoForward(
         readHistoryIndex(router.history.location.state),
       )
       if (edgeDirection === "back" && !canGoBack) return
