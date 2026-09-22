@@ -23,6 +23,11 @@
 .local
 .lesshst
 
+# local env (keep .env.example)
+.env
+.env.*
+!.env.example
+
 # archives
 *.zip
 *.tar.gz
