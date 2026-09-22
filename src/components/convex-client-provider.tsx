@@ -1,5 +1,6 @@
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
+import { useMemo } from "react";
 
 /**
  * Vite exposes only `VITE_*` variables to client and SSR bundles.
@@ -11,8 +12,6 @@ function readConvexUrl(): string | null {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
 }
-
-const CONVEX_URL = readConvexUrl();
 
 // Constructing ConvexReactClient without an address throws during module
 // init ("No address provided to ConvexReactClient") and TanStack Start turns
@@ -33,13 +32,14 @@ function createConvexClient(url: string | null): ConvexReactClient | null {
   }
 }
 
-const convex = createConvexClient(CONVEX_URL);
-
 export default function AppConvexProvider({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const convexUrl = readConvexUrl();
+  const convex = useMemo(() => createConvexClient(convexUrl), [convexUrl]);
+
   if (!convex) {
     return <MissingConvexUrlScreen />;
   }
