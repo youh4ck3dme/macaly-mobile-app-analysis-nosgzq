@@ -16,7 +16,7 @@ describe.skipIf(configured)("AppConvexProvider without Convex URL", () => {
 
     expect(
       screen.getByRole("heading", {
-        name: "Chýba CONVEX_URL — spusti convex dev",
+        name: "Chýba VITE_CONVEX_URL — spusti convex dev",
       }),
     ).toBeInTheDocument();
     expect(screen.queryByText("app shell")).not.toBeInTheDocument();
