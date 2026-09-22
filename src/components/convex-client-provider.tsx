@@ -18,18 +18,7 @@ function readConvexUrl(): string | null {
 // that into an unhandled HTTP 500 before any route UI can render.
 function createConvexClient(url: string | null): ConvexReactClient | null {
   if (!url) return null;
-  try {
-    return new ConvexReactClient(url);
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : "Convex client failed to start";
-    console.info(
-      `Failed to start Convex client for VITE_CONVEX_URL=${JSON.stringify(
-        url,
-      )}; rendering setup screen. ${reason}`,
-    );
-    return null;
-  }
+  return new ConvexReactClient(url);
 }
 
 export default function AppConvexProvider({
