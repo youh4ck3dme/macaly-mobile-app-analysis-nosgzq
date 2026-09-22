@@ -22,8 +22,12 @@ function createConvexClient(url: string | null): ConvexReactClient | null {
   try {
     return new ConvexReactClient(url);
   } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : "Convex client failed to start";
     console.info(
-      error instanceof Error ? error.message : "Convex client failed to start",
+      `Failed to start Convex client for VITE_CONVEX_URL=${JSON.stringify(
+        url,
+      )}; rendering setup screen. ${reason}`,
     );
     return null;
   }
